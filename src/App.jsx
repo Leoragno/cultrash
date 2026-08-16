@@ -55,7 +55,7 @@ const MG = {
 const TEAM_MG = {
   staffetta: { name: "STAFFETTA EMOJI", color: C.arancio, team: true, kind: "emoji", rule: "Un rebus di emoji per volta: risponde solo il membro di turno, gli altri hanno i tasti bloccati e possono solo urlare. Il giro passa da tutti." },
   enplein: { name: "EN PLEIN", color: C.lime, team: true, kind: "each", rule: "Ognuno riceve sul telefono una domanda diversa dagli altri: 100 punti per ogni membro che azzecca la sua, più 100 a testa se la squadra fa percorso netto." },
-  intruso: { name: "L'INTRUSO", color: C.lime, team: true, kind: "odd", rule: "Quattro nomi, uno non c'entra niente. Rispondono tutti: 100 a chi lo smaschera, più 100 a testa se la squadra fa percorso netto." },
+  intruso: { name: "L'INTRUSO", color: C.lime, team: true, kind: "odd", rule: "Quattro nomi, uno non c'entra niente. Risponde uno solo della squadra, a caso e sempre diverso dal turno prima: gli altri stanno a guardare. Se lo becca, 150 punti per tutti i compagni." },
   compatti: { name: "COMPATTI", color: C.cyan, team: true, kind: "opinion", rule: "Domanda senza risposta giusta: conta solo che la squadra scelga la stessa opzione. 200 a testa se siete unanimi, zero se qualcuno fa di testa sua." },
   puzzle: { name: "IL PEZZO MANCANTE", color: C.gold, team: true, kind: "puzzle", rule: "Ognuno ha un puzzle da ricomporre sul telefono. Chi lo finisce scopre le sue lettere: la squadra le mette insieme, ricava la parola e la scrive. Vince chi la manda per prima." },
 };
@@ -1148,6 +1148,19 @@ function Host({ onExit }) {
       const chosen = Object.values(byT).map((mem) => [...mem].sort((x, y) => x.id.localeCompare(y.id))[qi % mem.length]);
       activeIds = chosen.map((p) => p.id);
       activeNames = chosen.map((p) => p.name);
+    } else if (b.kind === "mg" && b.mg === "intruso") {
+      const byT = {};
+      playersRef.current.forEach((p) => { if (p.team != null) (byT[p.team] = byT[p.team] || []).push(p); });
+      const lastPick = usedRef.current.intrusoLast || {};
+      const chosen = Object.entries(byT).map(([ti, mem]) => {
+        const pool = mem.length > 1 ? mem.filter((p) => p.id !== lastPick[ti]) : mem;
+        const p = pick(pool.length ? pool : mem);
+        lastPick[ti] = p.id;
+        return p;
+      });
+      usedRef.current.intrusoLast = lastPick;
+      activeIds = chosen.map((p) => p.id);
+      activeNames = chosen.map((p) => p.name);
     }
     const kind = b.kind === "own" ? "quiz" : MG_ALL[b.mg].kind;
     const state = { phase: "quiz", rid, cat, q, rule, kind, mg: b.kind === "mg" ? b.mg : null, owner: owner?.id, ownerName: owner?.name, ownerTeam: b.team ?? null, teamName: b.team ? tn(b.team) : null, activeIds, activeNames, time: b.kind === "mg" && b.mg === "lampo" ? Math.max(6, Math.round(T / 2)) : T, diffLabel: cfgRef.current.diffLabel, qn: doneQ() + 1, qtot: totQ(), blockLabel: b.kind === "own" ? (b.team ? `Categoria di ${tn(b.team)}` : `Categoria di ${owner?.name}`) : MG_ALL[b.mg].name, ...extra };
@@ -1306,10 +1319,22 @@ function Host({ onExit }) {
       squadInfo[ti] = { allAnswered, allRight, allSame, sameCorrect: allSame && first === cur.q.c, size: mem.length };
     });
 
+    /* l'intruso lo becca (o no) un solo membro a caso: l'esito vale per tutta la squadra */
+    const intrusoTeamOk = {}, intrusoResponder = {};
+    if (cur.rule === "intruso" && Array.isArray(cur.activeIds)) {
+      cur.activeIds.forEach((pid) => {
+        const pl = ps.find((x) => x.id === pid);
+        if (pl?.team != null) {
+          intrusoTeamOk[pl.team] = ansRef.current[pid]?.answer === cur.q.c;
+          intrusoResponder[pl.team] = pl.name;
+        }
+      });
+    }
+
     updated = ps.map((p) => {
       const a = ansRef.current[p.id];
       const cIdx = cur.perC ? cur.perC[p.id] : cur.q.c;
-      const ok = cur.rule === "stima" ? false : !!a && a.answer === cIdx;
+      const ok = cur.rule === "stima" ? false : cur.rule === "intruso" ? !!intrusoTeamOk[p.team] : !!a && a.answer === cIdx;
       const base = a ? Math.round((100 + ((t - a.elapsed) / t) * 100) * K) : 0;
       let pts = 0, note = "";
       switch (cur.rule) {
@@ -1348,11 +1373,12 @@ function Host({ onExit }) {
           break;
         }
         case "intruso": {
-          const inf = squadInfo[p.team] || {};
-          pts = ok ? Math.round(100 * K) : 0;
-          if (inf.allRight) { pts += Math.round(100 * K); note = "percorso netto"; }
-          else if (!a) note = "bonus bruciato";
-          else if (!ok) note = "l'anello debole";
+          const mine = cur.activeIds?.includes(p.id);
+          const chi = intrusoResponder[p.team] || "il compagno";
+          pts = ok ? Math.round(150 * K) : 0;
+          note = mine
+            ? (ok ? "l'hai beccato: punti per tutti" : "intruso non trovato")
+            : (ok ? `${chi} l'ha beccato` : `${chi} non l'ha trovato`);
           break;
         }
         case "compatti": {
@@ -1853,8 +1879,8 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
               {cc && <span className="-rotate-1 px-3 py-1 text-sm font-bold uppercase" style={{ background: cc.color, color: C.ink }}>{cc.name}</span>}
               {mg && <span className="px-3 py-1 text-sm font-bold uppercase" style={{ background: mg.color, color: C.ink }}>{mg.name}</span>}
               {g.rule === "own" && <span className="px-3 py-1 text-sm font-bold uppercase" style={{ border: `2px solid ${C.cream}` }}>casa di {g.teamName || g.ownerName} ×2</span>}
-              {g.rule === "staffetta" && g.activeNames && (
-                <span className="px-3 py-1 text-sm font-bold uppercase" style={{ background: C.cream, color: C.ink }}>al buzzer: {g.activeNames.join(" · ")}</span>
+              {(g.rule === "staffetta" || g.rule === "intruso") && g.activeNames && (
+                <span className="px-3 py-1 text-sm font-bold uppercase" style={{ background: C.cream, color: C.ink }}>{g.rule === "staffetta" ? "al buzzer" : "risponde"}: {g.activeNames.join(" · ")}</span>
               )}
             </div>
             <span className="text-4xl font-bold" style={{ color: left < 5 ? C.magenta : C.cream }}>{g.phase === "quiz" ? Math.ceil(Math.max(0, left)) : "—"}</span>
@@ -2388,7 +2414,7 @@ function Player({ onExit }) {
   const myTeamName = myTeamMeta?.name || null;
   const teamScore = myTeam != null && s?.players ? s.players.filter((p) => p.team === myTeam).reduce((a, p) => a + p.score, 0) : null;
   const myQ = (s?.per && s.per[id]) || s?.q || { q: "", a: [] };
-  const benched = s?.rule === "staffetta" && Array.isArray(s.activeIds) && !s.activeIds.includes(id);
+  const benched = (s?.rule === "staffetta" || s?.rule === "intruso") && Array.isArray(s.activeIds) && !s.activeIds.includes(id);
   const mine = s?.res?.[id];
   const cc = s?.cat ? CATS[s.cat] : null;
   const mg = s?.mg ? MG_ALL[s.mg] : null;
@@ -2503,12 +2529,13 @@ function Player({ onExit }) {
                 ? (s.ownerTeam === myTeam ? "CASA VOSTRA · vale ×2" : `Categoria di ${s.teamName} · metà punti`)
                 : s.owner === id ? "CASA TUA · vale ×2" : `Categoria di ${s.ownerName} · metà punti`}
           </p>
-          {s.rule === "staffetta" && (
+          {(s.rule === "staffetta" || s.rule === "intruso") && (
             <p className="mb-2 border-2 px-3 py-2 text-sm font-bold" style={{ borderColor: C.arancio, color: benched ? C.cream : C.arancio }}>
-              {benched ? "Non è il tuo turno: tasti bloccati. Puoi solo urlare." : "Tocca a te. Tutta la squadra dipende da questo."}
+              {benched
+                ? "Tocca a un compagno: tasti bloccati. Puoi solo urlare."
+                : s.rule === "staffetta" ? "Tocca a te. Tutta la squadra dipende da questo." : "Tocca a te. Se lo becchi, i punti vanno a tutta la squadra."}
             </p>
           )}
-          {s.rule === "intruso" && <p className="mb-2 text-xs font-bold" style={{ color: C.lime }}>Devono rispondere tutti: se uno resta fermo, il bonus salta per l'intera squadra.</p>}
           {s.rule === "compatti" && <p className="mb-2 text-xs font-bold" style={{ color: C.cyan }}>Nessuna risposta è giusta: conta solo scegliere tutti la stessa. Accordatevi, in fretta.</p>}
           {s.rule === "verofalso" && <p className="mb-2 text-xs font-bold" style={{ color: C.lime }}>Vero o falso. Sbagliare non costa: contano i riflessi.</p>}
           {s.rule === "ruota" && <p className="mb-2 text-xs font-bold" style={{ color: C.gold }}>Rispondi al buio: la ruota decide dopo quanto vale, anche in negativo.</p>}
