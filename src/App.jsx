@@ -1,5 +1,6 @@
 import { storage } from "./sync";
 import { pick, shuffle, kState, kPlayer, pPrefix, code, uid, encW, decW, rouColore, scrambleTiles } from "./game/utils";
+import { sfx } from "./game/sound";
 import { useState, useEffect, useRef, useCallback } from "react";
 
 /* ============================================================
@@ -551,13 +552,59 @@ const CSS = `
 @keyframes tvin{from{transform:scale(.95);opacity:0}to{transform:none;opacity:1}}
 @keyframes glow{0%,100%{filter:brightness(1)}50%{filter:brightness(1.4)}}
 @keyframes pop{from{transform:scale(.8);opacity:0}to{transform:none;opacity:1}}
-.tvin{animation:tvin .3s ease-out}.glow{animation:glow 1.4s ease-in-out infinite}.pop{animation:pop .25s ease-out both}
+@keyframes shake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,50%,70%{transform:translateX(-8px)}40%,60%{transform:translateX(8px)}}
+@keyframes ringPulse{0%,100%{box-shadow:0 0 0 0 rgba(198,255,61,.55)}50%{box-shadow:0 0 0 10px rgba(198,255,61,0)}}
+@keyframes ringPulseHot{0%,100%{box-shadow:0 0 0 0 rgba(255,46,134,.6)}50%{box-shadow:0 0 0 12px rgba(255,46,134,0)}}
+@keyframes bump{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}
+@keyframes riseIn{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
+@keyframes fall{from{transform:translateY(-10vh) rotate(0deg);opacity:1}to{transform:translateY(110vh) rotate(540deg);opacity:.9}}
+@keyframes sweep{0%{background-position:-200% 0}100%{background-position:200% 0}}
+@keyframes gallop{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes spinFace{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+@keyframes tickPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
+.tvin{animation:tvin .3s ease-out}
+.glow{animation:glow 1.4s ease-in-out infinite}
+.pop{animation:pop .25s ease-out both}
+.shake{animation:shake .5s ease-in-out both}
+.buzzer-on{animation:ringPulse 1.1s ease-in-out infinite}
+.buzzer-hot{animation:ringPulseHot 1.1s ease-in-out infinite}
+.bump{animation:bump .35s ease-out both}
+.rise-in{animation:riseIn .4s ease-out both}
+.confetti-piece{position:fixed;top:0;width:9px;height:14px;pointer-events:none;z-index:60;animation:fall linear forwards}
+.sweep-bar{background-image:linear-gradient(100deg,transparent 40%,rgba(255,255,255,.35) 50%,transparent 60%);background-size:250% 100%;animation:sweep 1.1s linear infinite}
+.gallop{animation:gallop .5s ease-in-out infinite}
+.spin-face{animation:spinFace 2.2s cubic-bezier(.2,.8,.3,1) both}
+.tick-pulse{animation:tickPulse .35s ease-out both}
 .press{transition:transform .07s ease,box-shadow .07s ease}
 .press:active{transform:translate(3px,3px);box-shadow:none!important}
 button:focus-visible{outline:3px solid ${C.cream};outline-offset:3px}
 input{font-family:inherit}
-@media (prefers-reduced-motion:reduce){.tvin,.glow,.pop{animation:none!important}}
+@media (prefers-reduced-motion:reduce){.tvin,.glow,.pop,.shake,.buzzer-on,.buzzer-hot,.bump,.rise-in,.confetti-piece,.sweep-bar,.gallop,.spin-face,.tick-pulse{animation:none!important}}
 `;
+
+const CONFETTI_COLORS = [C.magenta, C.lime, C.gold, C.cyan, C.arancio, C.cream];
+
+/** Coriandoli CSS: niente asset, solo pezzetti colorati che cadono. */
+function Confetti({ n = 60 }) {
+  const pieces = useState(() => Array.from({ length: n }, (_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    delay: Math.random() * 0.6,
+    duration: 2.6 + Math.random() * 1.6,
+    color: pick(CONFETTI_COLORS),
+    rot: Math.random() * 60 - 30,
+  })))[0];
+  return (
+    <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
+      {pieces.map((p) => (
+        <span key={p.id} className="confetti-piece" style={{
+          left: `${p.left}%`, background: p.color, animationDelay: `${p.delay}s`, animationDuration: `${p.duration}s`,
+          transform: `rotate(${p.rot}deg)`,
+        }} />
+      ))}
+    </div>
+  );
+}
 
 /* ============================================================ */
 export default function CultrashParty() {
@@ -977,6 +1024,7 @@ function Host({ onExit }) {
   }
 
   function startMatch() {
+    sfx.start();
     flowRef.current = buildFlow(players);
     usedRef.current = {};
     setScreen("game");
@@ -1597,7 +1645,7 @@ function HostSetup({ mode, setMode, diff, setDiff, teamMode, setTeamMode, enable
         <p className="text-xs opacity-60">Nei round d'azzardo si scommettono soltanto i punti della partita: l'app non prevede denaro, acquisti o premi reali.</p>
       </div>
 
-      <button onClick={onOpen} disabled={!n} className="press mt-8 w-full py-6 text-4xl uppercase"
+      <button onClick={() => { sfx.select(); onOpen(); }} disabled={!n} className="press mt-8 w-full py-6 text-4xl uppercase"
         style={{ ...display, background: n ? C.magenta : "rgba(255,243,230,.15)", color: n ? C.cream : "rgba(255,243,230,.4)", boxShadow: n ? `7px 7px 0 ${C.lime}` : "none" }}>
         Apri la stanza
       </button>
@@ -1606,6 +1654,11 @@ function HostSetup({ mode, setMode, diff, setDiff, teamMode, setTeamMode, enable
 }
 
 function HostLobby({ room, players, canStart, onStart, err, M, D, T, teamMode, teamsList }) {
+  const countRef = useRef(players.length);
+  useEffect(() => {
+    if (players.length > countRef.current) sfx.join();
+    countRef.current = players.length;
+  }, [players.length]);
   return (
     <div className="tvin mx-auto max-w-4xl px-6 py-10">
       <p className="text-xs font-bold uppercase tracking-widest" style={{ color: C.lime }}>
@@ -1677,11 +1730,42 @@ function HostLobby({ room, players, canStart, onStart, err, M, D, T, teamMode, t
 }
 
 function HostGame({ g, left, T, players, answered, outcome, next, room, err, teamMode, teamsList }) {
+  const seenRef = useRef({ key: null, tickAt: null });
+
+  /* suoni: cambio fase/domanda, ed esito (giusto/sbagliato/azzardo/puzzle) */
+  useEffect(() => {
+    if (!g) return;
+    const key = `${g.phase}:${g.rid || ""}`;
+    if (seenRef.current.key === key) return;
+    seenRef.current.key = key;
+    if (["choose", "mgintro", "quiz", "vote", "puzzle", "bet", "azzardo"].includes(g.phase)) sfx.whoosh();
+    else if (g.phase === "azzardores") { sfx.drumroll(); setTimeout(() => sfx.reveal(), 550); }
+    else if (g.phase === "puzzleres") {
+      const anyWin = outcome && Object.values(outcome).some((o) => o?.ok);
+      (anyWin ? sfx.win : sfx.wrong)();
+    } else if (g.phase === "result" || g.phase === "voteres") {
+      const vals = outcome ? Object.values(outcome) : [];
+      const goodShare = vals.length ? vals.filter((o) => o?.pts > 0).length / vals.length : 0;
+      (goodShare >= 0.5 ? sfx.correct : sfx.wrong)();
+    }
+  }, [g?.phase, g?.rid]); // eslint-disable-line
+
+  /* tick del timer negli ultimi secondi */
+  useEffect(() => {
+    if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle")) return;
+    const secs = Math.ceil(left);
+    if (secs === seenRef.current.tickAt) return;
+    seenRef.current.tickAt = secs;
+    if (secs > 0 && secs <= 5) (secs === 1 ? sfx.tock : sfx.tick)();
+  }, [left, g?.phase]); // eslint-disable-line
+
   if (!g) return null;
   const cc = g.cat ? CATS[g.cat] : null;
   const mg = g.mg ? MG_ALL[g.mg] : null;
   const accent = mg?.color || cc?.color || C.cream;
   const timed = g.phase === "quiz" || g.phase === "vote";
+  const lowTime = timed && left < 5;
+  const goNext = () => { sfx.select(); next(); };
 
   return (
     <div className="mx-auto flex min-h-screen max-w-5xl flex-col px-6 py-6">
@@ -1691,26 +1775,26 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
       </div>
 
       {g.phase === "choose" && (
-        <div className="flex flex-1 flex-col items-center justify-center text-center">
+        <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <p className="text-sm uppercase tracking-widest opacity-60">Sta scegliendo la sua categoria</p>
-          <p className="my-4 text-7xl uppercase glow" style={{ ...display, color: players.find((p) => p.id === g.chooser)?.color }}>{g.chooserName}</p>
+          <p className="pop glow my-4 text-7xl uppercase" style={{ ...display, color: players.find((p) => p.id === g.chooser)?.color }}>{g.chooserName}</p>
           <div className="flex flex-wrap justify-center gap-2">
-            {g.cats.map((k) => <span key={k} className="border-2 px-4 py-2 text-xl uppercase" style={{ ...display, borderColor: CATS[k].color, color: CATS[k].color }}>{CATS[k].name}</span>)}
+            {g.cats.map((k, i) => <span key={k} className="rise-in border-2 px-4 py-2 text-xl uppercase" style={{ ...display, borderColor: CATS[k].color, color: CATS[k].color, animationDelay: `${i * 0.05}s` }}>{CATS[k].name}</span>)}
           </div>
           <p className="mt-6 text-sm opacity-60">Guarda il telefono. E scegli con giudizio: qui vale doppio.</p>
         </div>
       )}
 
       {g.phase === "mgintro" && (
-        <div className="flex flex-1 flex-col items-center justify-center text-center">
+        <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <p className="text-sm uppercase tracking-widest opacity-60">Minigioco</p>
-          <p className="my-4 text-7xl uppercase glow" style={{ ...display, color: mg.color }}>{mg.name}</p>
-          <p className="max-w-2xl border-2 px-6 py-4 text-xl" style={{ borderColor: mg.color }}>{mg.rule}</p>
+          <p className="pop glow my-4 text-7xl uppercase" style={{ ...display, color: mg.color }}>{mg.name}</p>
+          <p className="rise-in max-w-2xl border-2 px-6 py-4 text-xl" style={{ borderColor: mg.color, animationDelay: ".15s" }}>{mg.rule}</p>
         </div>
       )}
 
       {(g.phase === "azzardo" || g.phase === "azzardores") && (
-        <div className="tvin flex flex-1 flex-col">
+        <div key={g.phase} className="tvin flex flex-1 flex-col">
           {g.phase === "azzardo" && (
             <div className="mb-4 h-3 w-full" style={{ background: "rgba(255,243,230,.15)" }}>
               <div className="h-3" style={{ width: `${(Math.max(0, left) / AZZ_T) * 100}%`, background: accent, transition: "width .2s linear" }} />
@@ -1723,7 +1807,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
               {g.game === "cavalli" && (
                 <div className="w-full space-y-2">
                   {CAVALLI.map((c, i) => (
-                    <div key={i} className="flex items-center gap-4 border-2 px-4 py-4" style={{ borderColor: accent }}>
+                    <div key={i} className="gallop flex items-center gap-4 border-2 px-4 py-4" style={{ borderColor: accent, animationDelay: `${i * 0.09}s` }}>
                       <span className="text-4xl" style={{ ...display, color: accent }}>{i + 1}</span>
                       <span className="flex-1 text-3xl uppercase" style={display}>{c.nome}</span>
                       <span className="text-2xl font-bold">quota {c.quota}</span>
@@ -1732,7 +1816,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
                 </div>
               )}
               {g.game === "roulette" && (
-                <div className="grid w-full grid-cols-7 gap-2">
+                <div className="sweep-bar grid w-full grid-cols-7 gap-2">
                   {Array.from({ length: 13 }, (_, n) => (
                     <div key={n} className="flex aspect-square items-center justify-center text-3xl font-bold"
                       style={{ background: n === 0 ? "#2FBF71" : rouColore(n) === "rosso" ? C.magenta : "#1B1226", color: C.cream, border: `2px solid ${C.line || "rgba(255,243,230,.2)"}` }}>{n}</div>
@@ -1742,7 +1826,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
               {g.game === "russa" && (
                 <div className="grid w-full grid-cols-3 gap-3">
                   {[1, 2, 3, 4, 5, 6].map((n) => (
-                    <div key={n} className="flex aspect-square items-center justify-center border-4 text-5xl" style={{ ...display, borderColor: accent, color: accent }}>{n}</div>
+                    <div key={n} className="tick-pulse flex aspect-square items-center justify-center border-4 text-5xl" style={{ ...display, borderColor: accent, color: accent, animationDelay: `${n * 0.1}s`, animationIterationCount: "infinite", animationDuration: "1.4s" }}>{n}</div>
                   ))}
                 </div>
               )}
@@ -1751,20 +1835,20 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center text-center">
               <p className="text-sm uppercase tracking-widest opacity-60">{g.game === "cavalli" ? "Ha vinto" : g.game === "roulette" ? "È uscito" : "Era carica"}</p>
-              <p className="my-3 text-8xl uppercase glow" style={{ ...display, color: accent }}>{g.esito.label}</p>
+              <p className="pop my-3 text-8xl uppercase glow" style={{ ...display, color: accent }}>{g.esito.label}</p>
               <p className="text-2xl opacity-80">{g.esito.sub}</p>
               <div className="mt-6 w-full space-y-2">
-                {players.map((p) => (
-                  <div key={p.id} className="flex items-center gap-3 border-2 px-4 py-3" style={{ borderColor: outcome?.[p.id]?.pts > 0 ? C.lime : "rgba(255,243,230,.15)" }}>
+                {players.map((p, i) => (
+                  <div key={p.id} className="rise-in flex items-center gap-3 border-2 px-4 py-3" style={{ borderColor: outcome?.[p.id]?.pts > 0 ? C.lime : "rgba(255,243,230,.15)", animationDelay: `${i * 0.06}s` }}>
                     <span className="flex-1 text-2xl font-bold" style={{ color: p.color }}>{p.name}</span>
                     <span className="text-sm opacity-70">{outcome?.[p.id]?.note}</span>
-                    <span className="text-2xl font-bold" style={{ color: outcome?.[p.id]?.pts > 0 ? C.lime : C.magenta }}>
+                    <span className="bump text-2xl font-bold" style={{ color: outcome?.[p.id]?.pts > 0 ? C.lime : C.magenta }}>
                       {outcome?.[p.id]?.pts > 0 ? `+${outcome[p.id].pts}` : outcome?.[p.id]?.pts}
                     </span>
                   </div>
                 ))}
               </div>
-              <button onClick={next} className="press mt-6 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
+              <button onClick={goNext} className="press mt-6 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
                 {g.qn >= g.qtot ? "Verdetto finale" : "Avanti"}
               </button>
             </div>
@@ -1793,7 +1877,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
       )}
 
       {(g.phase === "puzzle" || g.phase === "puzzleres") && (
-        <div className="tvin flex flex-1 flex-col">
+        <div key={g.phase} className="tvin flex flex-1 flex-col">
           {g.phase === "puzzle" && (
             <div className="mb-4 h-3 w-full" style={{ background: "rgba(255,243,230,.15)" }}>
               <div className="h-3" style={{ width: `${(Math.max(0, left) / (g.time || PUZZLE_T)) * 100}%`, background: left < 15 ? C.magenta : C.gold, transition: "width .2s linear" }} />
@@ -1827,23 +1911,27 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
           ) : (
             <>
               <p className="text-xl opacity-70">La parola era</p>
-              <h2 className="mb-6 text-6xl uppercase" style={{ ...display, color: C.gold }}>{g.word}</h2>
+              <h2 className="mb-6 text-6xl uppercase" style={display}>
+                {g.word.split("").map((ch, i) => (
+                  <span key={i} className="pop inline-block" style={{ color: C.gold, animationDelay: `${i * 0.06}s` }}>{ch}</span>
+                ))}
+              </h2>
               <div className="space-y-2">
-                {teamsList.map((t) => {
+                {teamsList.map((t, i) => {
                   const rank = (g.order || []).indexOf(t.i);
                   const mem = players.filter((p) => p.team === t.i);
                   const pts = mem.reduce((s, p) => s + (outcome?.[p.id]?.pts || 0), 0);
                   return (
-                    <div key={t.i} className="flex items-center gap-3 border-2 px-4 py-3" style={{ borderColor: rank === 0 ? t.color : "rgba(255,243,230,.15)" }}>
+                    <div key={t.i} className={`rise-in flex items-center gap-3 border-2 px-4 py-3 ${rank === 0 ? "glow" : ""}`} style={{ borderColor: rank === 0 ? t.color : "rgba(255,243,230,.15)", animationDelay: `${i * 0.08}s` }}>
                       <span className="text-3xl" style={{ ...display, color: t.color }}>{rank >= 0 ? rank + 1 : "—"}</span>
                       <span className="flex-1 text-2xl uppercase" style={display}>{t.name}</span>
                       <span className="text-lg opacity-70">{rank >= 0 ? `${Math.round(g.times?.[t.i] || 0)}s` : "non ci sono arrivati"}</span>
-                      {pts > 0 && <span className="text-2xl font-bold" style={{ color: C.lime }}>+{pts}</span>}
+                      {pts > 0 && <span className="bump text-2xl font-bold" style={{ color: C.lime }}>+{pts}</span>}
                     </div>
                   );
                 })}
               </div>
-              <button onClick={next} className="press mt-6 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
+              <button onClick={goNext} className="press mt-6 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
                 {g.qn >= g.qtot ? "Verdetto finale" : "Avanti"}
               </button>
             </>
@@ -1852,7 +1940,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
       )}
 
       {(g.phase === "vote" || g.phase === "voteres") && (
-        <div className="tvin flex flex-1 flex-col">
+        <div key={g.phase} className="tvin flex flex-1 flex-col">
           {g.phase === "vote" && (
             <div className="mb-4 h-3 w-full" style={{ background: "rgba(255,243,230,.15)" }}>
               <div className="h-3" style={{ width: `${(Math.max(0, left) / T) * 100}%`, background: left < 5 ? C.magenta : C.arancio, transition: "width .2s linear" }} />
@@ -1862,21 +1950,21 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
           <h2 className="mb-8 text-4xl font-bold leading-tight sm:text-5xl">{g.prompt}</h2>
           {g.phase === "voteres" && outcome && (
             <div className="space-y-2">
-              {[...players].sort((a, b) => (outcome[b.id]?.votes || 0) - (outcome[a.id]?.votes || 0)).map((p) => (
-                <div key={p.id} className="flex items-center gap-3 border-2 px-4 py-3" style={{ borderColor: outcome[p.id]?.ok ? p.color : "rgba(255,243,230,.15)" }}>
+              {[...players].sort((a, b) => (outcome[b.id]?.votes || 0) - (outcome[a.id]?.votes || 0)).map((p, i) => (
+                <div key={p.id} className={`rise-in flex items-center gap-3 border-2 px-4 py-3 ${outcome[p.id]?.ok ? "glow" : ""}`} style={{ borderColor: outcome[p.id]?.ok ? p.color : "rgba(255,243,230,.15)", animationDelay: `${i * 0.07}s` }}>
                   <span className="flex-1 text-2xl font-bold" style={{ color: p.color }}>{p.name}</span>
                   <span className="text-xl">{outcome[p.id]?.votes || 0} voti</span>
-                  {outcome[p.id]?.pts > 0 && <span className="text-xl font-bold" style={{ color: C.lime }}>+{outcome[p.id].pts}</span>}
+                  {outcome[p.id]?.pts > 0 && <span className="bump text-xl font-bold" style={{ color: C.lime }}>+{outcome[p.id].pts}</span>}
                 </div>
               ))}
-              <button onClick={next} className="press mt-5 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>Avanti</button>
+              <button onClick={goNext} className="press mt-5 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>Avanti</button>
             </div>
           )}
         </div>
       )}
 
       {(g.phase === "quiz" || g.phase === "result") && g.q && (
-        <div className="tvin flex flex-1 flex-col">
+        <div key={`${g.rid}-${g.phase}`} className="tvin flex flex-1 flex-col">
           <div className="mb-4 h-3 w-full" style={{ background: "rgba(255,243,230,.15)" }}>
             <div className="h-3" style={{ width: `${(g.phase === "quiz" ? Math.max(0, left) / T : 0) * 100}%`, background: left < 5 ? C.magenta : accent, transition: "width .2s linear" }} />
           </div>
@@ -1886,10 +1974,10 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
               {mg && <span className="px-3 py-1 text-sm font-bold uppercase" style={{ background: mg.color, color: C.ink }}>{mg.name}</span>}
               {g.rule === "own" && <span className="px-3 py-1 text-sm font-bold uppercase" style={{ border: `2px solid ${C.cream}` }}>casa di {g.teamName || g.ownerName} ×2</span>}
               {(g.rule === "staffetta" || g.rule === "intruso") && g.activeNames && (
-                <span className="px-3 py-1 text-sm font-bold uppercase" style={{ background: C.cream, color: C.ink }}>{g.rule === "staffetta" ? "al buzzer" : "risponde"}: {g.activeNames.join(" · ")}</span>
+                <span className={`px-3 py-1 text-sm font-bold uppercase ${lowTime ? "buzzer-hot" : "buzzer-on"}`} style={{ background: C.cream, color: C.ink }}>{g.rule === "staffetta" ? "al buzzer" : "risponde"}: {g.activeNames.join(" · ")}</span>
               )}
             </div>
-            <span className="text-4xl font-bold" style={{ color: left < 5 ? C.magenta : C.cream }}>{g.phase === "quiz" ? Math.ceil(Math.max(0, left)) : "—"}</span>
+            <span key={g.phase === "quiz" ? Math.ceil(Math.max(0, left)) : "res"} className={`text-4xl font-bold ${lowTime ? "tick-pulse" : ""}`} style={{ color: left < 5 ? C.magenta : C.cream }}>{g.phase === "quiz" ? Math.ceil(Math.max(0, left)) : "—"}</span>
           </div>
 
           {g.rule === "enplein" ? (
@@ -1915,7 +2003,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
               {g.q.clues.map((cl, i) => {
                 const visibile = g.phase === "result" || left <= T - (i * T) / 3;
                 return (
-                  <div key={i} className="flex items-center gap-3 border-2 px-4 py-3 text-2xl"
+                  <div key={i} className={`flex items-center gap-3 border-2 px-4 py-3 text-2xl ${visibile ? "pop" : ""}`}
                     style={{ borderColor: visibile ? accent : "rgba(255,243,230,.15)", opacity: visibile ? 1 : .35 }}>
                     <span className="text-lg font-bold" style={{ color: accent }}>{i + 1}</span>
                     {visibile ? cl : "· · ·"}
@@ -1930,10 +2018,10 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
               {g.phase === "result" ? (
                 <>
                   <p className="text-sm uppercase tracking-widest opacity-60">Il numero esatto era</p>
-                  <p className="text-7xl" style={{ ...display, color: C.gold }}>{g.q.value} {g.q.unit}</p>
+                  <p className="pop text-7xl" style={{ ...display, color: C.gold }}>{g.q.value} {g.q.unit}</p>
                   <div className="mt-4 flex flex-wrap justify-center gap-3">
-                    {players.map((p) => (
-                      <span key={p.id} className="px-3 py-1 text-lg font-bold" style={{ background: outcome?.[p.id]?.pts > 0 ? C.lime : "rgba(255,243,230,.08)", color: outcome?.[p.id]?.pts > 0 ? C.ink : C.cream }}>
+                    {players.map((p, i) => (
+                      <span key={p.id} className="rise-in px-3 py-1 text-lg font-bold" style={{ background: outcome?.[p.id]?.pts > 0 ? C.lime : "rgba(255,243,230,.08)", color: outcome?.[p.id]?.pts > 0 ? C.ink : C.cream, animationDelay: `${i * 0.05}s` }}>
                         {p.name}: {answered[p.id] ? (outcome?.[p.id]?.note || "") : "niente"}
                       </span>
                     ))}
@@ -1948,7 +2036,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
             {g.q.a.map((a, i) => {
               const right = g.phase === "result" && i === g.q.c;
               return (
-                <div key={i} className="flex items-center gap-3 border-2 px-4 py-5 text-xl font-bold"
+                <div key={i} className={`flex items-center gap-3 border-2 px-4 py-5 text-xl font-bold ${right ? "pop" : ""}`}
                   style={{ borderColor: right ? C.lime : accent, background: right ? C.lime : g.phase === "result" ? "rgba(255,243,230,.04)" : "rgba(0,0,0,.25)", color: right ? C.ink : C.cream, opacity: g.phase === "result" && !right ? 0.5 : 1 }}>
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center text-lg" style={{ background: right ? C.ink : accent, color: right ? C.lime : C.ink }}>{LETTERS[i]}</span>
                   {a}
@@ -1959,9 +2047,9 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
           )}
 
           {g.phase === "result" && g.spin && (
-            <div className="mt-6 border-4 px-6 py-5 text-center" style={{ borderColor: C.gold, background: "rgba(255,201,60,.1)" }}>
+            <div className="pop mt-6 border-4 px-6 py-5 text-center" style={{ borderColor: C.gold, background: "rgba(255,201,60,.1)" }}>
               <p className="text-xs uppercase tracking-widest" style={{ color: C.gold }}>La ruota si è fermata su</p>
-              <p className="text-7xl uppercase" style={{ ...display, color: C.gold }}>{g.spin.label}</p>
+              <p className="glow text-7xl uppercase" style={{ ...display, color: C.gold }}>{g.spin.label}</p>
               <p className="text-lg opacity-80">{g.spin.note}</p>
             </div>
           )}
@@ -1980,7 +2068,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
                   ))}
                 </div>
               )}
-              <button onClick={next} className="press mt-5 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
+              <button onClick={goNext} className="press mt-5 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
                 {g.qn >= g.qtot ? "Verdetto finale" : "Avanti"}
               </button>
             </div>
@@ -1995,7 +2083,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
             return (
               <div key={t.i} className="flex items-center gap-3 px-4 py-2" style={{ background: t.color, color: C.ink }}>
                 <span className="text-xl uppercase" style={display}>{t.name}</span>
-                <span className="text-2xl font-bold">{tot}</span>
+                <span key={tot} className="bump text-2xl font-bold">{tot}</span>
               </div>
             );
           })}
@@ -2007,18 +2095,19 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
           const o = outcome?.[p.id];
           const done = answered[p.id];
           const showRes = g.phase === "result" || g.phase === "voteres";
+          const active = g.activeIds?.includes(p.id);
           return (
-            <div key={p.id} className="flex items-center gap-2 px-3 py-2"
+            <div key={p.id} className={`flex items-center gap-2 px-3 py-2 ${active ? (lowTime ? "buzzer-hot" : "buzzer-on") : ""}`}
               style={{
                 background: showRes ? (o?.pts > 0 ? C.lime : "rgba(255,243,230,.07)") : done ? p.color : "rgba(255,243,230,.07)",
                 color: showRes ? (o?.pts > 0 ? C.ink : C.cream) : done ? C.ink : C.cream,
                 outline: p.id === g.owner || p.id === g.chooser ? `2px solid ${C.cream}` : "none",
               }}>
               <span className="font-bold">{p.name}</span>
-              <span className="text-lg font-bold">{p.score}</span>
-              {showRes && o && o.pts !== 0 && <span className="text-sm font-bold">{o.pts > 0 ? `+${o.pts}` : o.pts}</span>}
+              <span key={p.score} className="bump text-lg font-bold">{p.score}</span>
+              {showRes && o && o.pts !== 0 && <span className="bump text-sm font-bold">{o.pts > 0 ? `+${o.pts}` : o.pts}</span>}
               {showRes && o?.note && <span className="text-xs">{o.note}</span>}
-              {timed && done && <span className="text-sm font-bold">pronto</span>}
+              {timed && done && <span className="pop text-sm font-bold">pronto</span>}
             </div>
           );
         })}
@@ -2029,6 +2118,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
 }
 
 function HostPodio({ rank, teamMode, teamsList, onAgain, onExit }) {
+  useEffect(() => { sfx.podium(); }, []);
   const tMeta = (id) => teamsList?.find((t) => t.i === id) || { name: "Squadra", color: C.cream };
   if (teamMode === "squadre") {
     const tot = {};
@@ -2037,15 +2127,16 @@ function HostPodio({ rank, teamMode, teamsList, onAgain, onExit }) {
     const winT = tRank[0];
     return (
       <div className="tvin mx-auto max-w-3xl px-6 py-10">
+        <Confetti />
         <p className="text-sm uppercase tracking-widest" style={{ color: C.lime }}>La squadra della serata</p>
-        <h2 className="my-2 text-7xl uppercase" style={{ ...display, color: tMeta(winT).color }}>{tMeta(winT).name}</h2>
-        <div className="-rotate-1 px-4 py-3" style={{ background: tMeta(winT).color, color: C.ink }}>
+        <h2 className="pop glow my-2 text-7xl uppercase" style={{ ...display, color: tMeta(winT).color }}>{tMeta(winT).name}</h2>
+        <div className="rise-in -rotate-1 px-4 py-3" style={{ background: tMeta(winT).color, color: C.ink, animationDelay: ".15s" }}>
           <p className="text-3xl uppercase" style={display}>{tot[winT]} punti</p>
           <p className="text-sm font-bold">{rank.filter((p) => p.team === winT).map((p) => p.name).join(" · ")}</p>
         </div>
         <div className="mt-8 space-y-4">
           {tRank.map((ti, i) => (
-            <div key={ti} className="border-2 p-4" style={{ borderColor: tMeta(ti).color }}>
+            <div key={ti} className="rise-in border-2 p-4" style={{ borderColor: tMeta(ti).color, animationDelay: `${0.2 + i * 0.09}s` }}>
               <div className="flex items-center gap-3">
                 <span className="text-4xl" style={{ ...display, color: tMeta(ti).color }}>{i + 1}</span>
                 <span className="flex-1 text-2xl uppercase" style={display}>{tMeta(ti).name}</span>
@@ -2068,15 +2159,16 @@ function HostPodio({ rank, teamMode, teamsList, onAgain, onExit }) {
   const titolo = win ? TITOLI[(win.right * 3 + win.risk) % TITOLI.length] : TITOLI[0];
   return (
     <div className="tvin mx-auto max-w-3xl px-6 py-10">
+      <Confetti />
       <p className="text-sm uppercase tracking-widest" style={{ color: C.lime }}>E il vincitore della serata</p>
-      <h2 className="my-2 text-7xl uppercase" style={{ ...display, color: win?.color }}>{win?.name}</h2>
-      <div className="-rotate-1 px-4 py-3" style={{ background: C.gold, color: C.ink }}>
+      <h2 className="pop glow my-2 text-7xl uppercase" style={{ ...display, color: win?.color }}>{win?.name}</h2>
+      <div className="rise-in -rotate-1 px-4 py-3" style={{ background: C.gold, color: C.ink, animationDelay: ".15s" }}>
         <p className="text-3xl uppercase" style={display}>{titolo.t}</p>
         <p className="text-sm font-bold">{titolo.d}</p>
       </div>
       <div className="mt-8 space-y-2">
         {rank.map((p, i) => (
-          <div key={p.id} className="flex items-center gap-4 border-2 px-4 py-3" style={{ borderColor: i === 0 ? p.color : "rgba(255,243,230,.15)" }}>
+          <div key={p.id} className="rise-in flex items-center gap-4 border-2 px-4 py-3" style={{ borderColor: i === 0 ? p.color : "rgba(255,243,230,.15)", animationDelay: `${0.2 + i * 0.08}s` }}>
             <span className="text-4xl" style={{ ...display, color: p.color }}>{i + 1}</span>
             <div className="flex-1">
               <p className="text-xl font-bold">{p.name}</p>
@@ -2116,7 +2208,7 @@ function AzzardoRound({ s, me, write }) {
         <div className="grid flex-1 grid-cols-3 gap-2">
           {[1, 2, 3, 4, 5, 6].map((n) => (
             <button key={n} onClick={() => { setPick({ slot: n }); setSent(true); write({ rid: s.rid, pick: { slot: n }, bet: 0 }); }}
-              disabled={sent} className="press flex items-center justify-center text-4xl"
+              disabled={sent} className={`press flex items-center justify-center text-4xl ${pick?.slot === n ? "bump" : ""}`}
               style={{ ...display, background: sent ? "rgba(255,243,230,.1)" : C.cyan, color: sent ? C.cream : C.ink, boxShadow: sent ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
               {n}
             </button>
@@ -2137,7 +2229,7 @@ function AzzardoRound({ s, me, write }) {
         <div className="flex flex-col gap-2">
           {(s.cavalli || []).map((c, i) => (
             <button key={i} onClick={() => setPick({ cavallo: i })} disabled={sent}
-              className="press flex items-center justify-between px-4 py-3 text-left"
+              className={`press flex items-center justify-between px-4 py-3 text-left ${pick?.cavallo === i ? "bump" : ""}`}
               style={{ background: pick?.cavallo === i ? C.cream : C.lime, color: C.ink, opacity: sent && pick?.cavallo !== i ? .3 : 1 }}>
               <span className="text-xl uppercase" style={display}>{c.nome}</span>
               <span className="text-sm font-bold">quota {c.quota}</span>
@@ -2259,14 +2351,14 @@ function PuzzleRound({ s, id, write }) {
           </div>
           <p className="mb-2 text-center text-sm opacity-70">Urlale ai compagni, prendete le loro e componete la parola.</p>
           {sent ? (
-            <div className="mt-2 px-4 py-6 text-center" style={{ background: C.lime, color: C.ink }}>
+            <div className="pop glow mt-2 px-4 py-6 text-center" style={{ background: C.lime, color: C.ink }}>
               <p className="text-3xl uppercase" style={display}>Inviata</p>
               <p className="text-sm font-bold">Se siete i primi, sono 300 punti.</p>
             </div>
           ) : (
             <>
               <input value={guess} onChange={(e) => setGuess(e.target.value.toUpperCase().slice(0, 16))} placeholder="LA PAROLA"
-                className="w-full border-2 bg-transparent px-4 py-4 text-center text-3xl font-bold tracking-widest"
+                className={`w-full border-2 bg-transparent px-4 py-4 text-center text-3xl font-bold tracking-widest ${wrong ? "shake" : ""}`}
                 style={{ borderColor: wrong ? C.magenta : C.gold, color: wrong ? C.magenta : C.cream }} autoCapitalize="characters" />
               <button onClick={submit} className="press mt-3 w-full py-4 text-2xl uppercase"
                 style={{ ...display, background: C.gold, color: C.ink, boxShadow: `5px 5px 0 ${C.magenta}` }}>Mandala</button>
@@ -2479,8 +2571,8 @@ function Player({ onExit }) {
             {myTeam && <p className="mt-3 text-center text-sm opacity-70">Sei con {myTeamName}. Puoi ancora cambiare idea.</p>}
           </div>
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center text-center">
-            <p className="text-4xl uppercase" style={{ ...display, color: C.lime }}>Sei dentro</p>
+          <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
+            <p className="pop glow text-4xl uppercase" style={{ ...display, color: C.lime }}>Sei dentro</p>
             <p className="mt-3 text-sm opacity-70">Guarda lo schermo grande. Si parte a momenti.</p>
           </div>
         )
@@ -2497,7 +2589,7 @@ function Player({ onExit }) {
                 const sel = answer === k;
                 return (
                   <button key={k} onClick={() => sendPick(k)} disabled={answer !== null}
-                    className="press flex flex-1 items-center px-4 py-4 text-left"
+                    className={`press flex flex-1 items-center px-4 py-4 text-left ${sel ? "bump" : ""}`}
                     style={{ background: sel ? C.cream : v.color, color: C.ink, opacity: answer !== null && !sel ? 0.25 : 1, boxShadow: answer !== null ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
                     <span className="text-2xl uppercase" style={display}>{v.name}</span>
                     <span className="ml-auto text-xs font-bold uppercase">{v.tag}</span>
@@ -2536,7 +2628,7 @@ function Player({ onExit }) {
                 : s.owner === id ? "CASA TUA · vale ×2" : `Categoria di ${s.ownerName} · metà punti`}
           </p>
           {(s.rule === "staffetta" || s.rule === "intruso") && (
-            <p className="mb-2 border-2 px-3 py-2 text-sm font-bold" style={{ borderColor: C.arancio, color: benched ? C.cream : C.arancio }}>
+            <p className={`mb-2 border-2 px-3 py-2 text-sm font-bold ${benched ? "" : "buzzer-hot"}`} style={{ borderColor: C.arancio, color: benched ? C.cream : C.arancio }}>
               {benched
                 ? "Tocca a un compagno: tasti bloccati. Puoi solo urlare."
                 : s.rule === "staffetta" ? "Tocca a te. Tutta la squadra dipende da questo." : "Tocca a te. Se lo becchi, i punti vanno a tutta la squadra."}
@@ -2591,7 +2683,7 @@ function Player({ onExit }) {
               const sel = (answer === i) || (pendAns === i), off = ((answer !== null || pendAns !== null) && !sel) || benched;
               return (
                 <button key={i} onClick={() => tapAnswer(i)} disabled={answer !== null || pendAns !== null || benched}
-                  className="press flex flex-1 items-center gap-3 px-4 py-4 text-left text-lg font-bold"
+                  className={`press flex flex-1 items-center gap-3 px-4 py-4 text-left text-lg font-bold ${sel ? "bump" : ""}`}
                   style={{ background: sel ? C.cream : accent, color: C.ink, opacity: off ? 0.25 : 1, boxShadow: off || sel ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center text-xl" style={{ background: C.ink, color: sel ? C.cream : accent, ...display }}>{LETTERS[i]}</span>
                   {a}
@@ -2654,8 +2746,8 @@ function Player({ onExit }) {
       {s?.phase === "azzardores" && (
         <div className="tvin flex flex-1 flex-col justify-center text-center">
           <p className="text-xs uppercase tracking-widest opacity-60">{s.game === "cavalli" ? "Ha vinto" : s.game === "roulette" ? "È uscito" : "Era carica"}</p>
-          <p className="my-2 text-5xl uppercase" style={{ ...display, color: C.gold }}>{s.esito.label}</p>
-          <div className="mt-4 px-4 py-5" style={{ background: mine?.pts > 0 ? C.lime : C.magenta, color: mine?.pts > 0 ? C.ink : C.cream }}>
+          <p className="pop glow my-2 text-5xl uppercase" style={{ ...display, color: C.gold }}>{s.esito.label}</p>
+          <div className={`mt-4 px-4 py-5 ${mine?.pts > 0 ? "pop" : "shake"}`} style={{ background: mine?.pts > 0 ? C.lime : C.magenta, color: mine?.pts > 0 ? C.ink : C.cream }}>
             <p className="text-4xl uppercase" style={display}>{mine?.pts > 0 ? `+${mine.pts}` : mine?.pts ?? 0}</p>
             <p className="text-sm font-bold">{mine?.note}</p>
           </div>
@@ -2666,7 +2758,7 @@ function Player({ onExit }) {
 
       {s?.phase === "puzzleres" && (
         <div className="tvin flex flex-1 flex-col justify-center">
-          <div className="px-4 py-5 text-center" style={{ background: mine?.pts > 0 ? C.lime : C.magenta, color: mine?.pts > 0 ? C.ink : C.cream }}>
+          <div className={`px-4 py-5 text-center ${mine?.pts > 0 ? "pop" : "shake"}`} style={{ background: mine?.pts > 0 ? C.lime : C.magenta, color: mine?.pts > 0 ? C.ink : C.cream }}>
             <p className="text-4xl uppercase" style={display}>{mine?.pts > 0 ? `+${mine.pts}` : "0 punti"}</p>
             <p className="text-sm font-bold">{mine?.note}</p>
           </div>
@@ -2698,8 +2790,8 @@ function Player({ onExit }) {
       )}
 
       {(s?.phase === "result" || s?.phase === "voteres") && (
-        <div className="tvin flex flex-1 flex-col justify-center">
-          <div className="px-4 py-5 text-center" style={{ background: mine?.pts > 0 ? C.lime : C.magenta, color: mine?.pts > 0 ? C.ink : C.cream }}>
+        <div key={s.rid} className="tvin flex flex-1 flex-col justify-center">
+          <div className={`px-4 py-5 text-center ${mine?.pts > 0 ? "pop" : "shake"}`} style={{ background: mine?.pts > 0 ? C.lime : C.magenta, color: mine?.pts > 0 ? C.ink : C.cream }}>
             <p className="text-4xl uppercase" style={display}>
               {mine ? (mine.pts > 0 ? `+${mine.pts}` : mine.pts < 0 ? `${mine.pts}` : "0 punti") : "niente"}
             </p>
@@ -2725,7 +2817,7 @@ function Player({ onExit }) {
         <div className="tvin flex flex-1 flex-col justify-center">
           <p className="text-center text-xs uppercase tracking-widest opacity-60">Classifica finale</p>
           {s.players.map((p, i) => (
-            <div key={p.id} className="mt-2 flex items-center gap-3 border-2 px-3 py-3" style={{ borderColor: p.id === id ? p.color : "rgba(255,243,230,.15)" }}>
+            <div key={p.id} className={`rise-in mt-2 flex items-center gap-3 border-2 px-3 py-3 ${p.id === id ? "glow" : ""}`} style={{ borderColor: p.id === id ? p.color : "rgba(255,243,230,.15)", animationDelay: `${i * 0.08}s` }}>
               <span className="text-2xl" style={{ ...display, color: p.color }}>{i + 1}</span>
               <span className="flex-1 font-bold">{p.name}</span>
               <span className="font-bold">{p.score}</span>
