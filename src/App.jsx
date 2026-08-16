@@ -53,9 +53,9 @@ const MG = {
 };
 
 const TEAM_MG = {
-  staffetta: { name: "STAFFETTA EMOJI", color: C.arancio, team: true, kind: "emoji", rule: "Un rebus di emoji per volta: risponde solo il membro di turno, gli altri hanno i tasti bloccati e possono solo urlare. Il giro passa da tutti." },
+  staffetta: { name: "STAFFETTA EMOJI", color: C.arancio, team: true, kind: "emoji", rule: "Un rebus di emoji per volta: risponde uno della squadra a caso, sempre diverso finché non è toccato a tutti. Gli altri hanno i tasti bloccati e possono solo urlare." },
   enplein: { name: "EN PLEIN", color: C.lime, team: true, kind: "each", rule: "Ognuno riceve sul telefono una domanda diversa dagli altri: 100 punti per ogni membro che azzecca la sua, più 100 a testa se la squadra fa percorso netto." },
-  intruso: { name: "L'INTRUSO", color: C.lime, team: true, kind: "odd", rule: "Quattro nomi, uno non c'entra niente. Risponde uno solo della squadra, a caso e sempre diverso dal turno prima: gli altri stanno a guardare. Se lo becca, 150 punti per tutti i compagni." },
+  intruso: { name: "L'INTRUSO", color: C.lime, team: true, kind: "odd", rule: "Quattro nomi, uno non c'entra niente. Risponde uno della squadra a caso, sempre diverso finché non è toccato a tutti: gli altri stanno a guardare. Se lo becca, 150 punti per tutti i compagni." },
   compatti: { name: "COMPATTI", color: C.cyan, team: true, kind: "opinion", rule: "Domanda senza risposta giusta: conta solo che la squadra scelga la stessa opzione. 200 a testa se siete unanimi, zero se qualcuno fa di testa sua." },
   puzzle: { name: "IL PEZZO MANCANTE", color: C.gold, team: true, kind: "puzzle", rule: "Ognuno ha un puzzle da ricomporre sul telefono. Chi lo finisce scopre le sue lettere: la squadra le mette insieme, ricava la parola e la scrive. Vince chi la manda per prima." },
 };
@@ -1024,6 +1024,27 @@ function Host({ onExit }) {
     await push({ ...state, players: pub(playersRef.current), room });
   }
 
+  /** Sceglie un membro a caso per ogni squadra: mai lo stesso due volte di fila,
+   *  e nessuno si ripete finché tutti gli altri compagni non hanno avuto un turno. */
+  function pickTurnPerTeam(key) {
+    const byT = {};
+    playersRef.current.forEach((p) => { if (p.team != null) (byT[p.team] = byT[p.team] || []).push(p); });
+    const queues = usedRef.current[key] || {};
+    const chosen = Object.entries(byT).map(([ti, mem]) => {
+      let q = queues[ti];
+      if (!q || !q.length) {
+        q = shuffle(mem.map((p) => p.id));
+        if (mem.length > 1 && q[0] === queues[`${ti}_prev`]) [q[0], q[1]] = [q[1], q[0]];
+      }
+      const id = q.shift();
+      queues[ti] = q;
+      queues[`${ti}_prev`] = id;
+      return mem.find((p) => p.id === id) || mem[0];
+    });
+    usedRef.current[key] = queues;
+    return { activeIds: chosen.map((p) => p.id), activeNames: chosen.map((p) => p.name) };
+  }
+
   async function ask(bi, qi) {
     posRef.current = { b: bi, q: qi };
     const b = flowRef.current[bi];
@@ -1143,24 +1164,9 @@ function Host({ onExit }) {
 
     let activeIds = null, activeNames = null;
     if (b.kind === "mg" && b.mg === "staffetta") {
-      const byT = {};
-      playersRef.current.forEach((p) => { if (p.team != null) (byT[p.team] = byT[p.team] || []).push(p); });
-      const chosen = Object.values(byT).map((mem) => [...mem].sort((x, y) => x.id.localeCompare(y.id))[qi % mem.length]);
-      activeIds = chosen.map((p) => p.id);
-      activeNames = chosen.map((p) => p.name);
+      ({ activeIds, activeNames } = pickTurnPerTeam("staffettaTurn"));
     } else if (b.kind === "mg" && b.mg === "intruso") {
-      const byT = {};
-      playersRef.current.forEach((p) => { if (p.team != null) (byT[p.team] = byT[p.team] || []).push(p); });
-      const lastPick = usedRef.current.intrusoLast || {};
-      const chosen = Object.entries(byT).map(([ti, mem]) => {
-        const pool = mem.length > 1 ? mem.filter((p) => p.id !== lastPick[ti]) : mem;
-        const p = pick(pool.length ? pool : mem);
-        lastPick[ti] = p.id;
-        return p;
-      });
-      usedRef.current.intrusoLast = lastPick;
-      activeIds = chosen.map((p) => p.id);
-      activeNames = chosen.map((p) => p.name);
+      ({ activeIds, activeNames } = pickTurnPerTeam("intrusoTurn"));
     }
     const kind = b.kind === "own" ? "quiz" : MG_ALL[b.mg].kind;
     const state = { phase: "quiz", rid, cat, q, rule, kind, mg: b.kind === "mg" ? b.mg : null, owner: owner?.id, ownerName: owner?.name, ownerTeam: b.team ?? null, teamName: b.team ? tn(b.team) : null, activeIds, activeNames, time: b.kind === "mg" && b.mg === "lampo" ? Math.max(6, Math.round(T / 2)) : T, diffLabel: cfgRef.current.diffLabel, qn: doneQ() + 1, qtot: totQ(), blockLabel: b.kind === "own" ? (b.team ? `Categoria di ${tn(b.team)}` : `Categoria di ${owner?.name}`) : MG_ALL[b.mg].name, ...extra };
