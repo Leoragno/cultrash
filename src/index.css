@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body { margin: 0; background: #140620; -webkit-text-size-adjust: 100%; }
+
+/* Su iOS evita lo zoom automatico quando si tocca un campo di testo. */
+input, textarea { font-size: 16px; }
