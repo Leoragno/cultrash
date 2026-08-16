@@ -50,16 +50,20 @@ sotto zero. Se il gioco finisce in mano a ragazzini, la sezione si può togliere
 ## Avvio rapido
 
 ```bash
-git clone https://github.com/<tuo-utente>/cultrash.git
+git clone https://github.com/Leoragno/cultrash.git
 cd cultrash
 npm install
+cp .env.example .env   # poi valorizza le variabili VITE_APPWRITE_* (vedi sotto)
 npm run dev
 ```
 
-`npm run dev` avvia due processi insieme:
+Il backend predefinito (`VITE_SYNC=appwrite`) parla direttamente con Appwrite Database: non
+serve avviare nessun server per giocare da più dispositivi, basta Vite.
+
+`npm run dev` avvia comunque due processi (utili se passi a `VITE_SYNC=rest`):
 
 - **Vite** su `http://localhost:5173` — l'interfaccia
-- **il server di sincronizzazione** su `http://localhost:8787` — lo spazio condiviso
+- **il server di sincronizzazione** su `http://localhost:8787` — usato solo in modalità `rest`
 
 Apri `http://localhost:5173` sul computer. Per collegare i telefoni della stessa rete usa
 l'indirizzo locale della macchina (`http://192.168.x.x:5173`) dopo aver avviato Vite con
@@ -67,12 +71,19 @@ l'indirizzo locale della macchina (`http://192.168.x.x:5173`) dopo aver avviato 
 
 ### Produzione
 
+Il sito è pubblicato su **Appwrite Sites** (build automatica da questo repo: `npm install` →
+`npm run build` → serve `dist/`). Per un deploy manuale con la CLI di Appwrite:
+
 ```bash
-npm run build   # genera dist/
-npm start       # il server serve dist/ e le API sulla stessa porta
+appwrite sites create-deployment --site-id cultrash --code . --activate true
 ```
 
-Una sola porta, un solo processo: niente CORS da configurare.
+In alternativa, senza Appwrite, resta disponibile il vecchio percorso a server unico:
+
+```bash
+npm run build   # genera dist/
+npm start       # il server serve dist/ e le API sulla stessa porta (richiede VITE_SYNC=rest)
+```
 
 ---
 

@@ -16,6 +16,7 @@
     "lint": "eslint src server"
   },
   "dependencies": {
+    "appwrite": "^26.2.0",
     "express": "^4.21.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -33,5 +34,7 @@
     "vite": "^6.0.7",
     "vitest": "^2.1.8"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  }
 }
