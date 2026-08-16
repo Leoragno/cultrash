@@ -531,6 +531,35 @@ const PENITENZE = [
   "Racconta una bugia su di te: se il gruppo ci casca, riprendi 50 punti.",
 ];
 
+/** «Ti conosco bene» (categoria Piccante): la casa risponde in segreto,
+ *  gli altri indovinano. Nessuna risposta giusta, solo preferenze. */
+const CONFRONTI = [
+  { a: "Cena a lume di candela", b: "Avventura last minute" },
+  { a: "Messaggio audace di notte", b: "Sguardo intenso dal vivo" },
+  { a: "Un bacio a sorpresa", b: "Una dichiarazione sincera" },
+  { a: "Locale elegante", b: "Serata in pigiama a casa" },
+  { a: "Flirtare per messaggio", b: "Flirtare guardandosi negli occhi" },
+  { a: "Weekend romantico", b: "Notte di follie" },
+  { a: "Complimento sull'aspetto", b: "Complimento sull'intelligenza" },
+  { a: "Sedurre con le parole", b: "Sedurre con i fatti" },
+  { a: "Ballare stretti", b: "Baciarsi al buio" },
+  { a: "Regalo audace", b: "Regalo sentimentale" },
+  { a: "Vestito elegante", b: "Look succinto" },
+  { a: "Fare la prima mossa", b: "Farsi corteggiare" },
+  { a: "Confessare un desiderio", b: "Mantenere il mistero" },
+  { a: "Baciare per primi", b: "Farsi baciare" },
+  { a: "Serata intima in due", b: "Festa hot con gli amici" },
+  { a: "Sussurrare", b: "Gridare" },
+  { a: "Toccare per primi", b: "Aspettare di essere toccati" },
+  { a: "Sedurre con lo sguardo", b: "Sedurre con la voce" },
+  { a: "Cena afrodisiaca", b: "Film piccante insieme" },
+  { a: "Chat bollente", b: "Videochiamata bollente" },
+  { a: "Iniziare tu il gioco", b: "Farlo iniziare a loro" },
+  { a: "Weekend fuori porta", b: "Notte in un hotel di lusso" },
+  { a: "Luci soffuse", b: "Buio totale" },
+  { a: "Profumo che seduce", b: "Pelle nuda e basta" },
+];
+
 const TITOLI = [
   { t: "Re/Regina del Trash", d: "Sa tutto di Sanremo, niente della Rivoluzione francese." },
   { t: "Enciclopedia Vivente", d: "Alle feste è insopportabile. Ma vince." },
@@ -939,6 +968,25 @@ function Host({ onExit }) {
         if (activeTeams.size && teamsDone.size >= activeTeams.size) resolve();
         return;
       }
+      if (cur.phase === "spicy") {
+        for (const p of playersRef.current) {
+          if (ansRef.current[p.id]) continue;
+          try {
+            const r = await storage.get(kPlayer(room, p.id), true);
+            const d = JSON.parse(r.value);
+            if (d.rid !== cur.rid) continue;
+            if (p.id === cur.owner && d.mine) {
+              ansRef.current[p.id] = { mine: d.mine };
+              setAnswered((a) => ({ ...a, [p.id]: true }));
+            } else if (p.id !== cur.owner && d.guess) {
+              ansRef.current[p.id] = { guess: d.guess };
+              setAnswered((a) => ({ ...a, [p.id]: true }));
+            }
+          } catch (_) {}
+        }
+        if (playersRef.current.length && playersRef.current.every((p) => ansRef.current[p.id])) resolve();
+        return;
+      }
       if (cur.phase !== "quiz" && cur.phase !== "vote") return;
 
       for (const p of playersRef.current) {
@@ -966,7 +1014,7 @@ function Host({ onExit }) {
 
   /* timer */
   useEffect(() => {
-    if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle" && g.phase !== "bet" && g.phase !== "azzardo")) return;
+    if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle" && g.phase !== "bet" && g.phase !== "azzardo" && g.phase !== "spicy")) return;
     if (left <= 0) {
       if (g.phase === "bet") { const { b, q } = posRef.current; ask(b, q); return; }
       resolve(); return;
@@ -1102,6 +1150,17 @@ function Host({ onExit }) {
     const rid = `${bi}-${qi}`;
     const owner = b.kind === "own" ? playersRef.current.find((p) => p.id === b.pid) : null;
 
+    if (b.kind === "own" && b.cat === "piccante") {
+      const seen = usedRef.current.confronti || [];
+      const confronto = pick(CONFRONTI.filter((c) => !seen.includes(c.a))) || pick(CONFRONTI);
+      usedRef.current.confronti = [...seen, confronto.a];
+      const state = { phase: "spicy", rid, cat: "piccante", rule: "own", confronto, owner: owner?.id, ownerName: owner?.name, ownerTeam: b.team ?? null, teamName: b.team ? tn(b.team) : null, time: T, qn: doneQ() + 1, qtot: totQ(), blockLabel: b.team ? `Categoria di ${tn(b.team)}` : `Categoria di ${owner?.name}` };
+      setG(state);
+      setLeft(T);
+      await push({ ...state, players: pub(playersRef.current), room });
+      return;
+    }
+
     if (b.kind === "mg" && b.mg === "vote") {
       const prompt = pick(VOTI.filter((v) => !(usedRef.current.voti || []).includes(v))) || pick(VOTI);
       usedRef.current.voti = [...(usedRef.current.voti || []), prompt];
@@ -1226,8 +1285,32 @@ function Host({ onExit }) {
 
   async function resolve() {
     const cur = gRef.current;
-    if (!cur || (cur.phase !== "quiz" && cur.phase !== "vote" && cur.phase !== "puzzle" && cur.phase !== "azzardo")) return;
+    if (!cur || (cur.phase !== "quiz" && cur.phase !== "vote" && cur.phase !== "puzzle" && cur.phase !== "azzardo" && cur.phase !== "spicy")) return;
     const ps = playersRef.current;
+
+    if (cur.phase === "spicy") {
+      const K = cfgRef.current.pmul;
+      const mine = ansRef.current[cur.owner]?.mine ?? null;
+      let rightCount = 0;
+      const res = {};
+      let updated = ps.map((p) => {
+        if (p.id === cur.owner) return p;
+        const g = ansRef.current[p.id]?.guess;
+        const right = mine != null && g === mine;
+        if (right) rightCount++;
+        const pts = right ? Math.round(120 * K) : 0;
+        res[p.id] = { ok: right, pts, answered: !!g, note: !g ? "muto: bonus bruciato" : right ? "ti conosce bene" : "toppato" };
+        return { ...p, score: Math.max(0, p.score + pts), right: p.right + (right ? 1 : 0), wrong: p.wrong + (right ? 0 : 1) };
+      });
+      const bonus = mine != null ? Math.round((40 + rightCount * 30) * K) : 0;
+      res[cur.owner] = { ok: mine != null, pts: bonus, answered: mine != null, note: mine == null ? "non ha risposto: niente bonus" : rightCount === 0 ? "un mistero per tutti" : `${rightCount} vi hanno capito` };
+      updated = updated.map((p) => (p.id === cur.owner ? { ...p, score: Math.max(0, p.score + bonus) } : p));
+      setG({ ...cur, phase: "spicyres", mine });
+      setPlayers(updated);
+      setOutcome(res);
+      await push({ phase: "spicyres", rid: cur.rid, confronto: cur.confronto, mine, owner: cur.owner, blockLabel: cur.blockLabel, res, players: pub(updated), room });
+      return;
+    }
     const res = {};
     let updated;
 
@@ -1497,7 +1580,7 @@ function Host({ onExit }) {
         default:
           pts = ok ? base : 0;
       }
-      const pen = !ok && a && ((cur.rule === "doppio" && a?.risk) || cur.rule === "indizi" || (cur.rule === "own" && cur.cat === "piccante")) ? pick(PENITENZE) : null;
+      const pen = !ok && a && ((cur.rule === "doppio" && a?.risk) || cur.rule === "indizi") ? pick(PENITENZE) : null;
       res[p.id] = { ok, pts, answered: !!a, risk: a?.risk, pen, note, owner: p.id === cur.owner };
       return { ...p, score: Math.max(0, p.score + pts), right: p.right + (ok ? 1 : 0), wrong: p.wrong + (ok ? 0 : 1), risk: p.risk + (a?.risk ? 1 : 0) };
     }).map((p) => {
@@ -1629,7 +1712,10 @@ function HostSetup({ mode, setMode, diff, setDiff, teamMode, setTeamMode, enable
       <h3 className="mt-10 text-2xl uppercase" style={display}>Come funziona</h3>
       <div className="mt-2 space-y-2 text-sm">
         <p className="border-l-4 pl-3" style={{ borderColor: C.gold }}>
-          <b>Round 1 — La tua categoria.</b> È l'unico round a domande classiche: si sceglie dal telefono, chi gioca in casa vale ×2 e gli altri prendono metà punti. Dopo, ogni minigioco ha meccanica e domande tutte sue.
+          <b>Round 1 — La tua categoria.</b> Domande classiche: si sceglie dal telefono, chi gioca in casa vale ×2 e gli altri prendono metà punti. Dopo, ogni minigioco ha meccanica e domande tutte sue.
+        </p>
+        <p className="border-l-4 pl-3" style={{ borderColor: CATS.piccante.color }}>
+          <b style={{ color: CATS.piccante.color }}>Piccante</b> <span className="text-xs uppercase opacity-70">eccezione</span> — «Ti conosco bene»: niente domande, si scoprono a vicenda. Chi gioca in casa risponde in segreto a un «o l'uno o l'altro» su di sé, gli altri indovinano cosa ha scelto.
         </p>
         {Object.values(MG).map((m) => (
           <p key={m.name} className="border-l-4 pl-3" style={{ borderColor: m.color }}>
@@ -1738,8 +1824,9 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
     const key = `${g.phase}:${g.rid || ""}`;
     if (seenRef.current.key === key) return;
     seenRef.current.key = key;
-    if (["choose", "mgintro", "quiz", "vote", "puzzle", "bet", "azzardo"].includes(g.phase)) sfx.whoosh();
+    if (["choose", "mgintro", "quiz", "vote", "puzzle", "bet", "azzardo", "spicy"].includes(g.phase)) sfx.whoosh();
     else if (g.phase === "azzardores") { sfx.drumroll(); setTimeout(() => sfx.reveal(), 550); }
+    else if (g.phase === "spicyres") { sfx.drumroll(); setTimeout(() => sfx.reveal(), 500); }
     else if (g.phase === "puzzleres") {
       const anyWin = outcome && Object.values(outcome).some((o) => o?.ok);
       (anyWin ? sfx.win : sfx.wrong)();
@@ -1752,7 +1839,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
 
   /* tick del timer negli ultimi secondi */
   useEffect(() => {
-    if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle")) return;
+    if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle" && g.phase !== "spicy")) return;
     const secs = Math.ceil(left);
     if (secs === seenRef.current.tickAt) return;
     seenRef.current.tickAt = secs;
@@ -1958,6 +2045,57 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
                 </div>
               ))}
               <button onClick={goNext} className="press mt-5 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>Avanti</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {(g.phase === "spicy" || g.phase === "spicyres") && (
+        <div key={g.phase} className="tvin flex flex-1 flex-col">
+          {g.phase === "spicy" && (
+            <div className="mb-4 h-3 w-full" style={{ background: "rgba(255,243,230,.15)" }}>
+              <div className={`h-3 ${left < 5 ? "glow" : ""}`} style={{ width: `${(Math.max(0, left) / T) * 100}%`, background: left < 5 ? C.magenta : C.gold, transition: "width .2s linear" }} />
+            </div>
+          )}
+          <span className="mb-2 self-start -rotate-1 px-3 py-1 text-sm font-bold uppercase" style={{ background: C.gold, color: C.ink }}>{g.blockLabel}</span>
+          <p className="mb-4 text-sm uppercase tracking-widest opacity-60">Ti conosco bene</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {["a", "b"].map((k) => {
+              const picked = g.phase === "spicyres" && g.mine === k;
+              return (
+                <div key={k} className={`border-2 px-6 py-10 text-center text-2xl font-bold ${picked ? "pop glow" : ""}`}
+                  style={{ borderColor: picked ? C.lime : C.gold, background: picked ? C.lime : "rgba(255,243,230,.04)", color: picked ? C.ink : C.cream, opacity: g.phase === "spicyres" && !picked ? 0.4 : 1 }}>
+                  {g.confronto[k]}
+                </div>
+              );
+            })}
+          </div>
+          {g.phase === "spicy" && <p className="mt-4 text-lg opacity-70">{g.teamName || g.ownerName} sceglie di nascosto sul telefono. Gli altri indovinano cosa ha scelto.</p>}
+          {g.phase === "spicyres" && outcome && (
+            <div className="mt-6">
+              <div className="space-y-2">
+                {players.filter((p) => p.id !== g.owner).map((p, i) => (
+                  <div key={p.id} className={`rise-in flex items-center gap-3 border-2 px-4 py-3 ${outcome[p.id]?.ok ? "glow" : ""}`} style={{ borderColor: outcome[p.id]?.ok ? p.color : "rgba(255,243,230,.15)", animationDelay: `${i * 0.06}s` }}>
+                    <span className="flex-1 text-xl font-bold" style={{ color: p.color }}>{p.name}</span>
+                    <span className="text-sm opacity-70">{outcome[p.id]?.note}</span>
+                    {outcome[p.id]?.pts > 0 && <span className="bump text-xl font-bold" style={{ color: C.lime }}>+{outcome[p.id].pts}</span>}
+                  </div>
+                ))}
+                {(() => {
+                  const own = outcome[g.owner];
+                  const ownerP = players.find((p) => p.id === g.owner);
+                  return (
+                    <div className="rise-in flex items-center gap-3 border-2 px-4 py-3" style={{ borderColor: C.gold, animationDelay: `${players.length * 0.06}s` }}>
+                      <span className="flex-1 text-xl font-bold" style={{ color: ownerP?.color }}>{ownerP?.name} <span className="text-xs uppercase opacity-70">(la casa)</span></span>
+                      <span className="text-sm opacity-70">{own?.note}</span>
+                      {own?.pts > 0 && <span className="bump text-xl font-bold" style={{ color: C.lime }}>+{own.pts}</span>}
+                    </div>
+                  );
+                })()}
+              </div>
+              <button onClick={goNext} className="press mt-5 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
+                {g.qn >= g.qtot ? "Verdetto finale" : "Avanti"}
+              </button>
             </div>
           )}
         </div>
@@ -2411,7 +2549,7 @@ function Player({ onExit }) {
         const st = JSON.parse(r.value);
         setS(st);
         setMsg("");
-        if ((st.phase === "quiz" || st.phase === "vote" || st.phase === "choose") && st.rid !== ridRef.current) {
+        if ((st.phase === "quiz" || st.phase === "vote" || st.phase === "choose" || st.phase === "spicy") && st.rid !== ridRef.current) {
           ridRef.current = st.rid;
           startRef.current = Date.now();
           setAnswer(null); setRisk(false); setNumGuess(""); setClueStep(0); setPendAns(null);
@@ -2469,6 +2607,12 @@ function Player({ onExit }) {
     if (answer !== null || s?.phase !== "vote") return;
     setAnswer(pid);
     const ok = await write({ rid: s.rid, vote: pid });
+    if (!ok) setAnswer(null);
+  }
+  async function sendSpicy(k) {
+    if (answer !== null || s?.phase !== "spicy") return;
+    setAnswer(k);
+    const ok = await write(s.owner === id ? { rid: s.rid, mine: k } : { rid: s.rid, guess: k });
     if (!ok) setAnswer(null);
   }
   async function sendPick(cat) {
@@ -2809,6 +2953,43 @@ function Player({ onExit }) {
               <p className="mt-1 text-xl font-bold leading-snug">{mine.pen}</p>
             </div>
           )}
+          <p className="mt-6 text-center text-sm opacity-60">Il resto è sullo schermo grande.</p>
+        </div>
+      )}
+
+      {s?.phase === "spicy" && (
+        <div className="tvin flex flex-1 flex-col">
+          <div className="mb-2 h-2 w-full" style={{ background: "rgba(255,243,230,.15)" }}>
+            <div className="h-2" style={{ width: `${bar}%`, background: C.gold, transition: `width ${s.time || 18}s linear` }} />
+          </div>
+          <p className="mb-1 text-xs font-bold uppercase" style={{ color: C.gold }}>Ti conosco bene</p>
+          <p className="mb-3 text-base font-bold leading-snug">
+            {s.owner === id ? "Scegli in segreto. Nessuno lo sa finché non si rivela." : `Cosa avrà scelto ${s.teamName || s.ownerName}?`}
+          </p>
+          <div className="flex flex-1 flex-col gap-3">
+            {["a", "b"].map((k) => {
+              const sel = answer === k, off = answer !== null && !sel;
+              return (
+                <button key={k} onClick={() => sendSpicy(k)} disabled={answer !== null}
+                  className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${sel ? "bump" : ""}`}
+                  style={{ background: sel ? C.cream : C.gold, color: C.ink, opacity: off ? 0.25 : 1, boxShadow: off || sel ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
+                  {s.confronto?.[k]}
+                </button>
+              );
+            })}
+          </div>
+          {answer && <p className="mt-2 text-center text-sm opacity-70">{s.owner === id ? "Scelto. Vediamo chi ti conosce." : "Detto. Ora si scopre."}</p>}
+        </div>
+      )}
+
+      {s?.phase === "spicyres" && (
+        <div key={s.rid} className="tvin flex flex-1 flex-col justify-center text-center">
+          <p className="text-xs uppercase tracking-widest opacity-60">La scelta vera era</p>
+          <p className="pop glow my-2 text-2xl font-bold" style={{ color: C.gold }}>{s.confronto?.[s.mine]}</p>
+          <div className={`mt-4 px-4 py-5 ${mine?.pts > 0 ? "pop" : "shake"}`} style={{ background: mine?.pts > 0 ? C.lime : "rgba(255,243,230,.08)", color: mine?.pts > 0 ? C.ink : C.cream }}>
+            <p className="text-4xl uppercase" style={display}>{mine?.pts > 0 ? `+${mine.pts}` : "0 punti"}</p>
+            <p className="text-sm font-bold">{mine?.note}</p>
+          </div>
           <p className="mt-6 text-center text-sm opacity-60">Il resto è sullo schermo grande.</p>
         </div>
       )}
