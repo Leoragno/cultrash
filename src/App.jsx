@@ -63,6 +63,14 @@ const TEAM_MG = {
 
 const MG_ALL = { ...MG, ...TEAM_MG };
 
+/** Raggruppa i minigiochi individuali in sottosezioni tematiche per la
+ *  schermata regole. I minigiochi di squadra (TEAM_MG) restano a parte. */
+const MG_GROUPS = [
+  { title: "Quiz e trabocchetti", desc: "Domanda, timer, risposta: le fondamenta della serata.", keys: ["verofalso", "indizi", "trabocchetto", "lampo", "citazioni"] },
+  { title: "Rischio e azzardo", desc: "Si punta prima di sapere, o si scommette dopo aver risposto.", keys: ["doppio", "puntata", "ruota", "cavalli", "roulette", "russa"] },
+  { title: "Indovina e sfida", desc: "Niente crocette: si stima, si duella, si vota.", keys: ["piumeno", "stima", "vote"] },
+];
+
 const PUZZLE_T = 100;
 const BET_T = 15;
 const BET_OPTS = [50, 150, 300];
@@ -1043,7 +1051,10 @@ function Host({ onExit }) {
           }
         } catch (_) {}
       }));
-      if (playersRef.current.length && playersRef.current.every((p) => ansRef.current[p.id])) resolve();
+      // in staffetta/intruso solo activeIds può rispondere: i compagni in panchina
+      // non scriveranno mai nulla, quindi si aspettano solo i turnisti.
+      const need = cur.activeIds || playersRef.current.map((p) => p.id);
+      if (need.length && need.every((pid) => ansRef.current[pid])) resolve();
     }, POLL_HOST);
     return () => clearInterval(t);
   }, [screen, room]); // eslint-disable-line
@@ -1760,16 +1771,31 @@ function HostSetup({ mode, setMode, diff, setDiff, teamMode, setTeamMode, enable
         <p className="border-l-4 pl-3" style={{ borderColor: CATS.piccante.color }}>
           <b style={{ color: CATS.piccante.color }}>Piccante</b> <span className="text-xs uppercase opacity-70">eccezione</span> — «Ti conosco bene»: niente domande, si scoprono a vicenda. Chi gioca in casa risponde in segreto a un «o l'uno o l'altro» su di sé, gli altri indovinano cosa ha scelto.
         </p>
-        {Object.values(MG).map((m) => (
-          <p key={m.name} className="border-l-4 pl-3" style={{ borderColor: m.color }}>
-            <b style={{ color: m.color }}>{m.name}.</b> {m.rule}
-          </p>
+        {MG_GROUPS.map((grp) => (
+          <div key={grp.title} className="pt-2">
+            <h4 className="text-sm uppercase tracking-wide opacity-70" style={display}>{grp.title}</h4>
+            <p className="mb-1 text-xs opacity-50">{grp.desc}</p>
+            {grp.keys.map((k) => {
+              const m = MG[k];
+              return (
+                <p key={k} className="border-l-4 pl-3" style={{ borderColor: m.color }}>
+                  <b style={{ color: m.color }}>{m.name}.</b> {m.rule}
+                </p>
+              );
+            })}
+          </div>
         ))}
-        {teamMode === "squadre" && Object.values(TEAM_MG).map((m) => (
-          <p key={m.name} className="border-l-4 pl-3" style={{ borderColor: m.color, background: "rgba(255,243,230,.05)" }}>
-            <b style={{ color: m.color }}>{m.name}</b> <span className="text-xs uppercase opacity-70">solo a squadre</span> — {m.rule}
-          </p>
-        ))}
+        {teamMode === "squadre" && (
+          <div className="pt-2">
+            <h4 className="text-sm uppercase tracking-wide opacity-70" style={display}>Di squadra</h4>
+            <p className="mb-1 text-xs opacity-50">Più telefoni della stessa squadra, un solo risultato per tutti.</p>
+            {Object.values(TEAM_MG).map((m) => (
+              <p key={m.name} className="border-l-4 pl-3" style={{ borderColor: m.color, background: "rgba(255,243,230,.05)" }}>
+                <b style={{ color: m.color }}>{m.name}</b> <span className="text-xs uppercase opacity-70">solo a squadre</span> — {m.rule}
+              </p>
+            ))}
+          </div>
+        )}
         <p className="text-xs opacity-60">I minigiochi vengono estratti a caso a ogni partita.</p>
         <p className="text-xs opacity-60">Nei round d'azzardo si scommettono soltanto i punti della partita: l'app non prevede denaro, acquisti o premi reali.</p>
       </div>
