@@ -872,7 +872,7 @@ function Host({ onExit }) {
     const scan = async () => {
       try {
         const res = await storage.list(pPrefix(room), true);
-        for (const id of (res?.keys || []).map((k) => k.split(":").pop())) {
+        await Promise.all((res?.keys || []).map((k) => k.split(":").pop()).map(async (id) => {
           try {
             const r = await storage.get(kPlayer(room, id), true);
             const d = JSON.parse(r.value);
@@ -888,7 +888,7 @@ function Host({ onExit }) {
               return ps;
             });
           } catch (_) {}
-        }
+        }));
       } catch (_) {}
     };
     scan();
@@ -917,8 +917,8 @@ function Host({ onExit }) {
         return;
       }
       if (cur.phase === "azzardo") {
-        for (const p of playersRef.current) {
-          if (ansRef.current[p.id]) continue;
+        await Promise.all(playersRef.current.map(async (p) => {
+          if (ansRef.current[p.id]) return;
           try {
             const r = await storage.get(kPlayer(room, p.id), true);
             const d = JSON.parse(r.value);
@@ -927,13 +927,13 @@ function Host({ onExit }) {
               setAnswered((a) => ({ ...a, [p.id]: true }));
             }
           } catch (_) {}
-        }
+        }));
         if (playersRef.current.length && playersRef.current.every((p) => ansRef.current[p.id])) resolve();
         return;
       }
       if (cur.phase === "bet") {
-        for (const p of playersRef.current) {
-          if (betsRef.current[p.id] != null) continue;
+        await Promise.all(playersRef.current.map(async (p) => {
+          if (betsRef.current[p.id] != null) return;
           try {
             const r = await storage.get(kPlayer(room, p.id), true);
             const d = JSON.parse(r.value);
@@ -942,7 +942,7 @@ function Host({ onExit }) {
               setAnswered((a) => ({ ...a, [p.id]: true }));
             }
           } catch (_) {}
-        }
+        }));
         if (playersRef.current.every((p) => betsRef.current[p.id] != null)) {
           const { b, q } = posRef.current;
           ask(b, q);
@@ -951,9 +951,9 @@ function Host({ onExit }) {
       }
       if (cur.phase === "puzzle") {
         const teamsDone = new Set();
-        for (const p of playersRef.current) {
+        await Promise.all(playersRef.current.map(async (p) => {
           const have = ansRef.current[p.id];
-          if (have?.word) { if (p.team) teamsDone.add(p.team); continue; }
+          if (have?.word) { if (p.team) teamsDone.add(p.team); return; }
           try {
             const r = await storage.get(kPlayer(room, p.id), true);
             const d = JSON.parse(r.value);
@@ -963,18 +963,18 @@ function Host({ onExit }) {
               if (d.word && p.team) teamsDone.add(p.team);
             }
           } catch (_) {}
-        }
+        }));
         const activeTeams = new Set(playersRef.current.filter((p) => p.team).map((p) => p.team));
         if (activeTeams.size && teamsDone.size >= activeTeams.size) resolve();
         return;
       }
       if (cur.phase === "spicy") {
-        for (const p of playersRef.current) {
-          if (ansRef.current[p.id]) continue;
+        await Promise.all(playersRef.current.map(async (p) => {
+          if (ansRef.current[p.id]) return;
           try {
             const r = await storage.get(kPlayer(room, p.id), true);
             const d = JSON.parse(r.value);
-            if (d.rid !== cur.rid) continue;
+            if (d.rid !== cur.rid) return;
             if (p.id === cur.owner && d.mine) {
               ansRef.current[p.id] = { mine: d.mine };
               setAnswered((a) => ({ ...a, [p.id]: true }));
@@ -983,18 +983,18 @@ function Host({ onExit }) {
               setAnswered((a) => ({ ...a, [p.id]: true }));
             }
           } catch (_) {}
-        }
+        }));
         if (playersRef.current.length && playersRef.current.every((p) => ansRef.current[p.id])) resolve();
         return;
       }
       if (cur.phase !== "quiz" && cur.phase !== "vote") return;
 
-      for (const p of playersRef.current) {
-        if (ansRef.current[p.id]) continue;
+      await Promise.all(playersRef.current.map(async (p) => {
+        if (ansRef.current[p.id]) return;
         try {
           const r = await storage.get(kPlayer(room, p.id), true);
           const d = JSON.parse(r.value);
-          if (d.rid !== cur.rid) continue;
+          if (d.rid !== cur.rid) return;
           if (cur.phase === "vote" && d.vote) {
             ansRef.current[p.id] = { vote: d.vote };
             setAnswered((a) => ({ ...a, [p.id]: true }));
@@ -1006,7 +1006,7 @@ function Host({ onExit }) {
             setAnswered((a) => ({ ...a, [p.id]: true }));
           }
         } catch (_) {}
-      }
+      }));
       if (playersRef.current.length && playersRef.current.every((p) => ansRef.current[p.id])) resolve();
     }, POLL_HOST);
     return () => clearInterval(t);
@@ -2584,12 +2584,8 @@ function Player({ onExit }) {
   }
 
   async function write(obj) {
-    try {
-      let prev = {};
-      try { const pr = await storage.get(kPlayer(room, id), true); prev = JSON.parse(pr.value) || {}; } catch (_) {}
-      await storage.set(kPlayer(room, id), JSON.stringify({ ...prev, id, name, ...obj }), true);
-      return true;
-    } catch (_) { setMsg("Non inviato. Riprova."); return false; }
+    try { await storage.set(kPlayer(room, id), JSON.stringify({ id, name, ...obj }), true); return true; }
+    catch (_) { setMsg("Non inviato. Riprova."); return false; }
   }
 
   function tapAnswer(i) {
