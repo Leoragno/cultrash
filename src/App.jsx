@@ -2514,7 +2514,15 @@ function PuzzleRound({ s, id, write }) {
    PLAYER
    ============================================================ */
 function Player({ onExit }) {
-  const [id] = useState(uid);
+  const [id] = useState(() => {
+    try {
+      const saved = localStorage.getItem("cultrash:pid");
+      if (saved) return saved;
+      const fresh = uid();
+      localStorage.setItem("cultrash:pid", fresh);
+      return fresh;
+    } catch (_) { return uid(); }
+  });
   const [room, setRoom] = useState("");
   const [name, setName] = useState("");
   const [joined, setJoined] = useState(false);
@@ -2568,14 +2576,20 @@ function Player({ onExit }) {
     try { await storage.get(kState(r), true); }
     catch (_) { setMsg("Codice non trovato. Controlla lo schermo grande."); return; }
     try {
-      await storage.set(kPlayer(r, id), JSON.stringify({ id, name: name.trim().slice(0, 12), joined: Date.now() }), true);
+      let prev = {};
+      try { const pr = await storage.get(kPlayer(r, id), true); prev = JSON.parse(pr.value) || {}; } catch (_) {}
+      await storage.set(kPlayer(r, id), JSON.stringify({ ...prev, id, name: name.trim().slice(0, 12), joined: Date.now() }), true);
       setRoom(r); setJoined(true);
     } catch (_) { setMsg("Non riesco a entrare. Riprova tra un secondo."); }
   }
 
   async function write(obj) {
-    try { await storage.set(kPlayer(room, id), JSON.stringify({ id, name, ...obj }), true); return true; }
-    catch (_) { setMsg("Non inviato. Riprova."); return false; }
+    try {
+      let prev = {};
+      try { const pr = await storage.get(kPlayer(room, id), true); prev = JSON.parse(pr.value) || {}; } catch (_) {}
+      await storage.set(kPlayer(room, id), JSON.stringify({ ...prev, id, name, ...obj }), true);
+      return true;
+    } catch (_) { setMsg("Non inviato. Riprova."); return false; }
   }
 
   function tapAnswer(i) {
