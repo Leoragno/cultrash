@@ -2486,6 +2486,18 @@ function AzzardoRound({ s, me, write }) {
   );
 }
 
+/** Disegni diversi per l'immagine del puzzle scorrevole: niente foto vere
+ *  (l'app resta autonoma, senza asset esterni), ma almeno non è sempre
+ *  lo stesso vortice ricolorato — cambia anche la forma del pattern. */
+const PUZZLE_DESIGNS = [
+  (h1, h2, h3, h4) => `conic-gradient(from ${h1}deg at 35% 30%, hsl(${h1},90%,60%), hsl(${h2},90%,55%), hsl(${h3},85%,60%), hsl(${h4},90%,58%), hsl(${h1},90%,60%))`,
+  (h1, h2, h3, h4) => `radial-gradient(circle at 30% 30%, hsl(${h1},95%,65%) 0%, hsl(${h2},90%,55%) 35%, hsl(${h3},85%,45%) 70%, hsl(${h4},90%,35%) 100%)`,
+  (h1, h2, h3) => `repeating-linear-gradient(45deg, hsl(${h1},85%,58%) 0 12%, hsl(${h2},85%,50%) 12% 24%, hsl(${h3},85%,58%) 24% 36%)`,
+  (h1, h2) => `repeating-conic-gradient(from 0deg, hsl(${h1},85%,55%) 0deg 45deg, hsl(${h2},85%,45%) 45deg 90deg)`,
+  (h1, h3, h4) => `linear-gradient(120deg, hsl(${h1},90%,60%) 0%, hsl(${h3},85%,45%) 100%), radial-gradient(circle at 70% 70%, hsl(${h4},90%,55%), transparent 60%)`,
+  (h1, h2, h3) => `repeating-radial-gradient(ellipse at 50% 40%, hsl(${h1},90%,58%) 0 8%, hsl(${h2},85%,48%) 8% 16%, hsl(${h3},85%,58%) 16% 24%)`,
+];
+
 /* ---------------- PUZZLE SCORREVOLE ---------------- */
 function PuzzleRound({ s, id, write }) {
   const N = 3, BLANK = N * N - 1;
@@ -2499,7 +2511,10 @@ function PuzzleRound({ s, id, write }) {
   const solved = tiles.every((t, i) => t === i);
   const myLetters = (s.letters || {})[id] || "";
   const target = decW(s.w || "");
+  const seed = (s.rid || "").split("").reduce((a, c) => a + c.charCodeAt(0), 0) + id.charCodeAt(0) * 13;
   const hue = (id.charCodeAt(0) * 37 + (s.rid || "").length * 53) % 360;
+  const design = PUZZLE_DESIGNS[seed % PUZZLE_DESIGNS.length];
+  const bg = design(hue, (hue + 70) % 360, (hue + 160) % 360, (hue + 250) % 360);
 
   useEffect(() => {
     if (!solved || doneRef.current) return;
@@ -2538,7 +2553,7 @@ function PuzzleRound({ s, id, write }) {
               <button key={i} onClick={() => tap(i)} aria-label={`pezzo ${i + 1}`}
                 className="press aspect-square w-full"
                 style={t === BLANK ? { background: "rgba(255,243,230,.06)" } : {
-                  backgroundImage: `conic-gradient(from ${hue}deg at 35% 30%, hsl(${hue},90%,60%), hsl(${(hue + 70) % 360},90%,55%), hsl(${(hue + 160) % 360},85%,60%), hsl(${(hue + 250) % 360},90%,58%), hsl(${hue},90%,60%))`,
+                  backgroundImage: bg,
                   backgroundSize: "300% 300%",
                   backgroundPosition: `${(t % N) * 50}% ${Math.floor(t / N) * 50}%`,
                   boxShadow: "2px 2px 0 rgba(0,0,0,.5)",
