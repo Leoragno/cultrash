@@ -4026,7 +4026,7 @@ function Player({ onExit }) {
         const st = JSON.parse(r.value);
         setS(st);
         setMsg("");
-        if ((st.phase === "quiz" || st.phase === "vote" || st.phase === "choose" || st.phase === "spicy") && st.rid !== ridRef.current) {
+        if ((st.phase === "quiz" || st.phase === "vote" || st.phase === "choose" || st.phase === "spicy" || st.phase === "bet") && st.rid !== ridRef.current) {
           ridRef.current = st.rid;
           startRef.current = Date.now();
           setAnswer(null); setRisk(false); setNumGuess(""); setClueStep(0); setPendAns(null); setReady(false);
