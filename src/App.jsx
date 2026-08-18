@@ -2222,6 +2222,7 @@ function Host({ onExit }) {
 
   const playersRef = useRef(players), gRef = useRef(g), ansRef = useRef({}), usedRef = useRef(loadUsed());
   const flowRef = useRef([]), betsRef = useRef({}), posRef = useRef({ b: 0, q: 0 }), cfgRef = useRef({ T, cats }), teamsRef = useRef([]);
+  const nextingRef = useRef(false);
   const tn = (tid) => teamsRef.current.find((t) => t.i === tid)?.name || "Squadra";
   playersRef.current = players; gRef.current = g;
   cfgRef.current = { T, cats, pool: D.pool, pmul: D.pmul, diffLabel: D.label, teamMode };
@@ -3044,11 +3045,13 @@ function Host({ onExit }) {
   }
 
   function next() {
+    if (nextingRef.current) return;
+    nextingRef.current = true;
     const { b, q } = posRef.current;
     const blk = flowRef.current[b];
-    if (q + 1 < blk.n) (blk.mg === "puntata" ? askBet(b, q + 1) : ask(b, q + 1));
-    else if (b + 1 < flowRef.current.length) runBlock(b + 1);
-    else endMatch();
+    const p = q + 1 < blk.n ? (blk.mg === "puntata" ? askBet(b, q + 1) : ask(b, q + 1))
+      : b + 1 < flowRef.current.length ? runBlock(b + 1) : endMatch();
+    Promise.resolve(p).finally(() => { nextingRef.current = false; });
   }
 
   async function endMatch() {
