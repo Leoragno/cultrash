@@ -1966,7 +1966,7 @@ const RF_CRUSH = [
   { lv: 4, q: "Chi di voi flirterebbe con la crush di un amico pensando di non essere scoperto?" },
 ];
 
-const RF_SCELTA_T = 10, RF_CONF_T = 15, RF_VOTE_T = 15, RF_HOTSEAT_T = 30, RF_HOTSEAT_VOTE_T = 12, RF_BLUFF_T = 18, RF_BLUFFVOTE_T = 12;
+const RF_SCELTA_T = 60, RF_CONF_T = 60, RF_VOTE_T = 60, RF_HOTSEAT_T = 60, RF_HOTSEAT_VOTE_T = 60, RF_BLUFF_T = 60, RF_BLUFFVOTE_T = 60;
 
 /** I sei titoli finali, assegnati sulle statistiche raccolte durante la partita. */
 const RF_TITLES = [
@@ -2475,6 +2475,7 @@ function Host({ onExit }) {
 
   const pub = (ps) => ps.map((p) => ({
     id: p.id, name: p.name, color: p.color, score: p.score, team: p.team ?? null,
+    teamName: p.team != null ? tn(p.team) : null,
     flags: p.flags ?? 0, lastConfessione: p.lastConfessione || null, lastHotseat: p.lastHotseat || null, votedAgainst: p.votedAgainst || null,
   }));
   const totQ = () => flowRef.current.reduce((s, b) => s + b.n, 0);
@@ -2516,10 +2517,11 @@ function Host({ onExit }) {
     push({ phase: "lobby", players: pub(players), room, mode: M.label, teamMode, teams: teamsList });
   }, [screen, players, teamMode]); // eslint-disable-line
 
-  /* raccolta input dai telefoni */
-  useEffect(() => {
-    if (screen !== "game") return;
-    const t = setInterval(async () => {
+  /* raccolta input dai telefoni: estratta in funzione a sé (non solo nell'interval)
+   * così il timer può fare un'ultima scansione "a bruciapelo" allo scadere, invece
+   * di rischiare di perdere una risposta arrivata nell'ultimo mezzo secondo e non
+   * ancora vista dal giro di poll regolare (che gira ogni POLL_HOST=1500ms). */
+  async function pollAnswers() {
       const cur = gRef.current;
       if (!cur) return;
 
@@ -2646,7 +2648,11 @@ function Host({ onExit }) {
       // non scriveranno mai nulla, quindi si aspettano solo i turnisti.
       const need = cur.activeIds || playersRef.current.map((p) => p.id);
       if (need.length && need.every((pid) => ansRef.current[pid])) resolve();
-    }, POLL_HOST);
+  }
+
+  useEffect(() => {
+    if (screen !== "game") return;
+    const t = setInterval(pollAnswers, POLL_HOST);
     return () => clearInterval(t);
   }, [screen, room]); // eslint-disable-line
 
@@ -2654,8 +2660,14 @@ function Host({ onExit }) {
   useEffect(() => {
     if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle" && g.phase !== "bet" && g.phase !== "azzardo" && g.phase !== "spicy")) return;
     if (left <= 0) {
-      if (g.phase === "bet") { const { b, q } = posRef.current; ask(b, q); return; }
-      resolve(); return;
+      // ultima scansione prima di chiudere il round: prende anche una risposta
+      // arrivata a un soffio dallo scadere, che il poll regolare potrebbe non
+      // aver ancora visto (gira ogni 1,5s, il countdown scatta ogni 200ms).
+      pollAnswers().then(() => {
+        if (g.phase === "bet") { const { b, q } = posRef.current; ask(b, q); return; }
+        resolve();
+      });
+      return;
     }
     const t = setTimeout(() => setLeft((l) => +(l - HOST_TICK / 1000).toFixed(2)), HOST_TICK);
     return () => clearTimeout(t);
@@ -3251,12 +3263,19 @@ function Host({ onExit }) {
     const rule = b.kind === "own" ? "own" : b.mg;
     let cat = null, q = null, extra = {};
     /** Come draw(): rispetta la difficoltà scelta (se le voci hanno un campo
-     *  `d`) e pesca a rotazione, senza ripetere finché non si esaurisce il mazzo. */
-    const once = (key, arr, keyf = (x) => x.q) => {
+     *  `d`) e pesca a rotazione, senza ripetere finché non si esaurisce il mazzo.
+     *  `avoid`, se passato, esclude anche le voci già assegnate nello stesso giro
+     *  (serve a en plein: due giocatori non devono mai vedersi la stessa domanda
+     *  nello stesso round, anche quando il mazzo generale sta per esaurirsi). */
+    const once = (key, arr, keyf = (x) => x.q, avoid = null) => {
       const allowed = arr.filter((x) => x.d == null || cfgRef.current.pool.includes(x.d));
       const base = allowed.length ? allowed : arr;
       const seen = usedRef.current[key] || [];
-      const free = base.filter((x) => !seen.includes(keyf(x)));
+      let free = base.filter((x) => !seen.includes(keyf(x)));
+      if (avoid && avoid.size) {
+        const freeAvoiding = free.filter((x) => !avoid.has(keyf(x)));
+        free = freeAvoiding.length ? freeAvoiding : base.filter((x) => !avoid.has(keyf(x)));
+      }
       const list = free.length ? free : base;
       const it = pick(list);
       usedRef.current[key] = free.length ? [...seen, keyf(it)] : [keyf(it)];
@@ -3306,8 +3325,10 @@ function Host({ onExit }) {
       q = { q: it.q, a: o.map((i) => it.a[i]), c: o.indexOf(it.c), f: it.f };
     } else if (b.mg === "enplein") {
       const per = {}, perC = {}, perF = {};
+      const roundPicked = new Set();
       playersRef.current.forEach((p) => {
-        const it = once("def", DEFINIZIONI);
+        const it = once("def", DEFINIZIONI, (x) => x.q, roundPicked);
+        roundPicked.add(it.q);
         const o = shuffle([0, 1, 2, 3]);
         per[p.id] = { q: it.q, a: o.map((i) => it.a[i]) };
         perC[p.id] = o.indexOf(it.c);
@@ -5569,7 +5590,10 @@ function Player({ onExit }) {
           {s.players.map((p, i) => (
             <div key={p.id} className={`rise-in mt-2 flex items-center gap-3 border-2 px-3 py-3 ${p.id === id ? "glow" : ""}`} style={{ borderColor: p.id === id ? p.color : "rgba(255,243,230,.15)", animationDelay: `${i * 0.08}s` }}>
               <span className="text-2xl" style={{ ...display, color: p.color }}>{i + 1}</span>
-              <span className="flex-1 font-bold">{p.name}</span>
+              <span className="flex-1 font-bold">
+                {p.name}
+                {p.teamName && <span className="ml-2 text-xs font-normal opacity-60">{p.teamName}</span>}
+              </span>
               <span className="font-bold">{p.score}</span>
             </div>
           ))}
