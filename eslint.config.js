@@ -8,6 +8,7 @@ const globaliBrowser = {
   setTimeout: "readonly", clearTimeout: "readonly",
   setInterval: "readonly", clearInterval: "readonly",
   btoa: "readonly", atob: "readonly",
+  SpeechSynthesisUtterance: "readonly", speechSynthesis: "readonly",
 };
 
 export default [

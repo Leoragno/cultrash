@@ -1,6 +1,7 @@
 import { storage } from "./sync";
 import { pick, shuffle, kState, kPlayer, pPrefix, code, uid, encW, decW, rouColore, scrambleTiles } from "./game/utils";
 import { sfx } from "./game/sound";
+import { narrate, stopNarration } from "./game/narrator";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 /* ============================================================
@@ -2008,6 +2009,11 @@ const CSS = `
 @keyframes grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
 @keyframes flagWave{0%,100%{transform:rotate(-4deg)}50%{transform:rotate(5deg)}}
 @keyframes scan{0%{transform:translateY(-100%)}100%{transform:translateY(100vh)}}
+@keyframes presenterBob{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-6px) rotate(1deg)}}
+@keyframes presenterBlink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+@keyframes presenterTalk{0%,100%{transform:scaleY(.45)}50%{transform:scaleY(1)}}
+@keyframes presenterGlow{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:.65;transform:scale(1.1)}}
+@keyframes presenterMicPulse{0%{transform:scale(.5);opacity:.7}100%{transform:scale(2.4);opacity:0}}
 .tvin{animation:tvin .3s ease-out}
 .glow{animation:glow 1.4s ease-in-out infinite}
 .pop{animation:pop .25s ease-out both}
@@ -2033,7 +2039,12 @@ const CSS = `
 .press:active{transform:translate(3px,3px);box-shadow:none!important}
 button:focus-visible{outline:3px solid ${C.cream};outline-offset:3px}
 input{font-family:inherit}
-@media (prefers-reduced-motion:reduce){.tvin,.glow,.pop,.shake,.buzzer-on,.buzzer-hot,.bump,.rise-in,.confetti-piece,.sweep-bar,.gallop,.spin-face,.tick-pulse,.wheel-idle,.stamp-in,.slide-l,.slide-r,.grow-up,.flag-wave,.rf-scan::after{animation:none!important}}
+.presenter-bob{animation:presenterBob 2.4s ease-in-out infinite}
+.presenter-blink{transform-box:fill-box;transform-origin:center;animation:presenterBlink 4.5s ease-in-out infinite}
+.presenter-mouth-talk{transform-box:fill-box;transform-origin:center;animation:presenterTalk .22s ease-in-out infinite}
+.presenter-glow{animation:presenterGlow 2.2s ease-in-out infinite}
+.presenter-mic-pulse{transform-box:fill-box;transform-origin:center;animation:presenterMicPulse 1s ease-out infinite}
+@media (prefers-reduced-motion:reduce){.tvin,.glow,.pop,.shake,.buzzer-on,.buzzer-hot,.bump,.rise-in,.confetti-piece,.sweep-bar,.gallop,.spin-face,.tick-pulse,.wheel-idle,.stamp-in,.slide-l,.slide-r,.grow-up,.flag-wave,.rf-scan::after,.presenter-bob,.presenter-blink,.presenter-mouth-talk,.presenter-glow,.presenter-mic-pulse{animation:none!important}}
 `;
 
 const CONFETTI_COLORS = [C.magenta, C.lime, C.gold, C.cyan, C.arancio, C.cream];
@@ -2056,6 +2067,49 @@ function Confetti({ n = 60 }) {
           transform: `rotate(${p.rot}deg)`,
         }} />
       ))}
+    </div>
+  );
+}
+
+/** Mascotte presentatore: SVG neo-brutalista, dondola in idle e apre/chiude
+ *  la bocca a ripetizione mentre `talking` è vero (sincronizzato a grana
+ *  grossa con la voce sintetizzata, non frame-accurate ma sufficiente). */
+function Presenter({ talking = false, color = C.gold, size = 132 }) {
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size * 1.3, height: size * 1.4 }}>
+      <div aria-hidden className="presenter-glow" style={{
+        position: "absolute", width: size * 1.05, height: size * 1.05, borderRadius: "9999px",
+        background: `radial-gradient(circle, ${color}66, transparent 70%)`, filter: "blur(16px)",
+      }} />
+      <div className="presenter-bob relative" style={{ width: size, height: size * 1.15 }}>
+        <svg viewBox="0 0 140 150" width="100%" height="100%" aria-hidden>
+          <ellipse cx="70" cy="144" rx="36" ry="5" fill="rgba(0,0,0,.35)" />
+          <path d="M20 150 Q20 104 70 104 Q120 104 120 150 Z" fill={C.ink} stroke={C.cream} strokeWidth="4" />
+          <path d="M96 120 Q113 113 116 90" stroke={C.ink} strokeWidth="11" fill="none" strokeLinecap="round" />
+          <path d="M96 120 Q113 113 116 90" stroke={color} strokeWidth="5" fill="none" strokeLinecap="round" />
+          {talking && <circle className="presenter-mic-pulse" cx="117" cy="87" r="9" fill="none" stroke={color} strokeWidth="2" />}
+          <rect x="112" y="93" width="10" height="15" rx="3" fill="#2b2b2b" stroke={C.cream} strokeWidth="1.5" />
+          <circle cx="117" cy="86" r="9" fill="#2b2b2b" stroke={C.cream} strokeWidth="2.5" />
+          <path d="M60 106 L70 114 L60 122 Z" fill={color} stroke={C.ink} strokeWidth="3" />
+          <path d="M80 106 L70 114 L80 122 Z" fill={color} stroke={C.ink} strokeWidth="3" />
+          <circle cx="70" cy="114" r="4.5" fill={C.ink} stroke={C.cream} strokeWidth="2" />
+          <circle cx="70" cy="58" r="48" fill={color} stroke={C.ink} strokeWidth="5" />
+          <path d="M38 28 Q50 4 68 18 Q82 0 100 24" fill="none" stroke={C.ink} strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="36" cy="68" r="7" fill={C.magenta} opacity=".5" />
+          <circle cx="104" cy="68" r="7" fill={C.magenta} opacity=".5" />
+          <rect x="37" y="38" width="20" height="6" rx="3" fill={C.ink} transform="rotate(-8 47 41)" />
+          <rect x="83" y="38" width="20" height="6" rx="3" fill={C.ink} transform="rotate(8 93 41)" />
+          <ellipse className="presenter-blink" cx="50" cy="56" rx="7.5" ry="9.5" fill={C.ink} />
+          <ellipse className="presenter-blink" cx="90" cy="56" rx="7.5" ry="9.5" fill={C.ink} />
+          <circle cx="52.5" cy="53" r="2" fill={C.cream} />
+          <circle cx="92.5" cy="53" r="2" fill={C.cream} />
+          {talking ? (
+            <ellipse className="presenter-mouth-talk" cx="70" cy="82" rx="14" ry="10" fill={C.ink} />
+          ) : (
+            <rect x="55" y="84" width="30" height="5" rx="2.5" fill={C.ink} />
+          )}
+        </svg>
+      </div>
     </div>
   );
 }
@@ -2378,6 +2432,7 @@ function Host({ onExit }) {
   const [answered, setAnswered] = useState({});
   const [outcome, setOutcome] = useState(null);
   const [err, setErr] = useState("");
+  const [narrating, setNarrating] = useState(false);
 
   const M = MODES[mode];
   const D = DIFF[diff];
@@ -2397,6 +2452,9 @@ function Host({ onExit }) {
 
   /* persiste su questo dispositivo cosa è già stato proposto, oltre la singola partita */
   useEffect(() => { saveUsed(usedRef.current); }, [g, rf]);
+
+  /* niente voce orfana se si esce dalla partita mentre il presentatore sta parlando */
+  useEffect(() => () => stopNarration(), []);
 
   const teamsList = [];
   players.forEach((p) => {
@@ -3082,7 +3140,13 @@ function Host({ onExit }) {
       const state = { phase: "mgintro", mg: b.mg, blockLabel: MG_ALL[b.mg].name, qn: doneQ(), qtot: totQ() };
       setG(state);
       await push({ ...state, players: pub(playersRef.current), room });
-      setTimeout(() => (b.mg === "puntata" ? askBet(i, 0) : ask(i, 0)), 4200);
+      const advance = () => {
+        if (gRef.current?.phase !== "mgintro" || posRef.current.b !== i) return;
+        b.mg === "puntata" ? askBet(i, 0) : ask(i, 0);
+      };
+      setNarrating(true);
+      narrate(MG_ALL[b.mg].rule, { onEnd: () => { setNarrating(false); setTimeout(advance, 900); } });
+      setTimeout(() => { setNarrating(false); advance(); }, 15000);
     }
   }
 
@@ -3644,7 +3708,7 @@ function Host({ onExit }) {
     }} />;
   }
 
-  return <HostGame {...{ g, left, T, players, answered, outcome, next, room, err, teamMode, teamsList }} />;
+  return <HostGame {...{ g, left, T, players, answered, outcome, next, room, err, teamMode, teamsList, narrating }} />;
 }
 
 function HostSetup({ partyType, setPartyType, mode, setMode, diff, setDiff, teamMode, setTeamMode, enabled, setEnabled, rfIntensity, setRfIntensity, onOpen, onExit }) {
@@ -3919,7 +3983,7 @@ function HostLobby({ room, players, canStart, onStart, err, M, D, T, teamMode, t
   );
 }
 
-function HostGame({ g, left, T, players, answered, outcome, next, room, err, teamMode, teamsList }) {
+function HostGame({ g, left, T, players, answered, outcome, next, room, err, teamMode, teamsList, narrating }) {
   const seenRef = useRef({ key: null, tickAt: null });
 
   /* suoni: cambio fase/domanda, ed esito (giusto/sbagliato/azzardo/puzzle) */
@@ -3980,7 +4044,8 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <p className="text-sm uppercase tracking-widest opacity-60">Minigioco</p>
           <p className="pop glow my-4 text-7xl uppercase" style={{ ...display, color: mg.color }}>{mg.name}</p>
-          <p className="rise-in max-w-2xl border-2 px-6 py-4 text-xl" style={{ borderColor: mg.color, animationDelay: ".15s" }}>{mg.rule}</p>
+          <Presenter talking={narrating} color={mg.color} />
+          <p className="rise-in mt-4 max-w-2xl border-2 px-6 py-4 text-xl" style={{ borderColor: mg.color, animationDelay: ".15s" }}>{mg.rule}</p>
         </div>
       )}
 
@@ -5245,6 +5310,7 @@ function Player({ onExit }) {
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <p className="text-xs uppercase tracking-widest opacity-60">Minigioco</p>
           <p className="glow text-4xl uppercase" style={{ ...display, color: mg.color }}>{mg.name}</p>
+          <Presenter talking={false} color={mg.color} size={92} />
           <p className="mt-4 border-2 px-4 py-3 text-sm" style={{ borderColor: mg.color }}>{mg.rule}</p>
         </div>
       )}
