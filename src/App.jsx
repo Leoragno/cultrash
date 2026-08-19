@@ -2238,11 +2238,36 @@ export default function CultrashParty() {
   return (
     <div style={shell}>
       <style>{CSS}</style>
+      <FullscreenToggle />
       {!role && <Roles onPick={setRole} storageOk={!!ok} />}
       {role === "idee" && <Suggest onExit={() => setRole(null)} />}
       {role === "host" && <Host onExit={() => setRole(null)} />}
       {role === "player" && <Player onExit={() => setRole(null)} />}
     </div>
+  );
+}
+
+/** Tasto fisso per passare a schermo intero: comodo soprattutto sullo
+ *  schermo host quando è collegato a una TV. Nessun prefisso vendor:
+ *  l'API standard copre ormai tutti i browser che contano. */
+function FullscreenToggle() {
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    const onChange = () => setFull(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  if (typeof document !== "undefined" && !document.documentElement.requestFullscreen) return null;
+  const toggle = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  };
+  return (
+    <button onClick={toggle} title={full ? "Esci da schermo intero" : "Schermo intero"}
+      className="press fixed right-3 top-3 z-50 flex h-10 w-10 items-center justify-center border-2 text-lg"
+      style={{ borderColor: "rgba(255,243,230,.3)", background: "rgba(20,10,25,.55)", color: C.cream }}>
+      {full ? "⤡" : "⤢"}
+    </button>
   );
 }
 
@@ -2993,18 +3018,23 @@ function Host({ onExit }) {
     const timed = ["rf-scelta", "rf-confessione", "rf-vote", "rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"];
     if (!timed.includes(rf.phase)) return;
     if (left <= 0) {
-      if (rf.phase === "rf-hotseat") { beginHotseatVote(); return; }
-      if (rf.phase === "rf-bluff") { beginBluffVote(); return; }
-      resolveRf(); return;
+      // come per il Quiz Classico: un'ultima scansione prima di chiudere la fase,
+      // per non perdere una scelta/voto arrivato a un soffio dallo scadere.
+      pollRfAnswers().then(() => {
+        if (rf.phase === "rf-hotseat") { beginHotseatVote(); return; }
+        if (rf.phase === "rf-bluff") { beginBluffVote(); return; }
+        resolveRf();
+      });
+      return;
     }
     const t = setTimeout(() => setLeft((l) => +(l - HOST_TICK / 1000).toFixed(2)), HOST_TICK);
     return () => clearTimeout(t);
   }, [rf, left]); // eslint-disable-line
 
-  /* raccolta input dai telefoni — Red Flag */
-  useEffect(() => {
-    if (screen !== "rf-game") return;
-    const t = setInterval(async () => {
+  /* raccolta input dai telefoni — Red Flag: estratta in funzione a sé (non solo
+   * nell'interval) così il timer può fare un'ultima scansione a bruciapelo allo
+   * scadere, come già fatto per il Quiz Classico (vedi pollAnswers più sopra). */
+  async function pollRfAnswers() {
       const cur = rfRef.current;
       if (!cur) return;
 
@@ -3129,7 +3159,11 @@ function Host({ onExit }) {
         if (voters.length && voters.every((p) => ansRef.current[p.id])) resolveRf();
         return;
       }
-    }, POLL_HOST);
+  }
+
+  useEffect(() => {
+    if (screen !== "rf-game") return;
+    const t = setInterval(pollRfAnswers, POLL_HOST);
     return () => clearInterval(t);
   }, [screen, room]); // eslint-disable-line
 
