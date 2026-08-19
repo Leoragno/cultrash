@@ -100,4 +100,19 @@ export const sfx = {
   },
   /** Puzzle risolto. */
   win: () => melody([659, 784, 988, 1318], { type: "triangle", gain: 0.18, step: 0.08, noteDur: 0.16 }),
+
+  /** Red Flag: battito sordo di tensione, sul countdown del giudizio. */
+  rfPulse: () => tone({ freq: 90, duration: 0.16, type: "sine", gain: 0.14 }),
+  /** Red Flag: rullo più cupo e lungo prima del verdetto. */
+  rfDrumroll: () => {
+    for (let i = 0; i < 14; i++) noise({ duration: 0.07, gain: 0.1 + i * 0.006, delay: i * 0.09, filterFreq: 700 });
+    tone({ freq: 70, duration: 0.4, type: "sine", gain: 0.2, delay: 1.25 });
+  },
+  /** Red Flag: sting cupo sul verdetto "red flag". */
+  rfGuilty: () => {
+    tone({ freq: 220, to: 80, duration: 0.5, type: "sawtooth", gain: 0.22 });
+    noise({ duration: 0.35, gain: 0.12, filterFreq: 300, filterType: "lowpass" });
+  },
+  /** Red Flag: campanello luminoso sul verdetto "assolto". */
+  rfInnocent: () => melody([784, 988, 1318], { type: "sine", gain: 0.18, step: 0.08, noteDur: 0.18 }),
 };
