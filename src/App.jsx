@@ -1926,7 +1926,46 @@ const RF_CAOS = [
   { lv: 1, q: "Chi di voi convincerebbe tutti a fare una follia e poi si tirerebbe indietro per primo?" },
 ];
 
-const RF_SCELTA_T = 10, RF_CONF_T = 15, RF_VOTE_T = 15, RF_HOTSEAT_T = 30, RF_HOTSEAT_VOTE_T = 12;
+/** «Bluff»: il bersaglio risponde a voce, decidendo in segreto se dire la
+ *  verità o inventare. Il gruppo poi vota se ci ha creduto o no. */
+const RF_BLUFF = [
+  { lv: 1, q: "Qual è la bugia più assurda che hai raccontato per uscire da un impegno?" },
+  { lv: 1, q: "Qual è la scusa più creativa che useresti per arrivare tardi a un appuntamento?" },
+  { lv: 1, q: "Qual è il complimento più esagerato che hai mai fatto per fare colpo su qualcuno?" },
+  { lv: 2, q: "Qual è la cosa più strana che diresti per fare colpo al primo appuntamento?" },
+  { lv: 2, q: "Qual è la bugia bianca che diresti per evitare una lite di coppia?" },
+  { lv: 2, q: "Qual è il messaggio più imbarazzante che potresti aver mandato a una crush?" },
+  { lv: 2, q: "Qual è il motivo più assurdo per cui potresti aver ignorato un messaggio?" },
+  { lv: 2, q: "Qual è la scusa che daresti se ti beccassero a guardare il profilo di un ex?" },
+  { lv: 3, q: "Qual è la bugia più grossa che diresti per coprire un amico in una serata andata male?" },
+  { lv: 3, q: "Qual è la scusa che useresti per giustificare uno stalking sui social?" },
+  { lv: 3, q: "Qual è la bugia che diresti per non ammettere di avere ancora sentimenti per un ex?" },
+  { lv: 3, q: "Qual è la versione dei fatti che daresti per non ammettere una gelosia?" },
+  { lv: 4, q: "Qual è la bugia più cattiva che diresti per proteggere solo te stesso/a?" },
+  { lv: 4, q: "Qual è il segreto più grosso che negheresti fino alla morte?" },
+  { lv: 4, q: "Qual è la bugia che diresti in faccia a un amico se ti convenisse davvero?" },
+];
+
+/** «Crush»: stesso schema di «Chi è la Red Flag» — voto segreto — ma sul
+ *  tema cotte e attrazione nel gruppo. */
+const RF_CRUSH = [
+  { lv: 1, q: "Chi di voi flirterebbe pur di vincere un gioco?" },
+  { lv: 1, q: "Chi di voi arrossisce più facilmente se lo prendono in giro per una cotta?" },
+  { lv: 1, q: "Chi di voi ha la cotta più ovvia del gruppo, che notano tutti tranne l'interessato/a?" },
+  { lv: 2, q: "Chi di voi ha già avuto una cotta per qualcuno seduto in questa stanza?" },
+  { lv: 2, q: "Chi di voi manderebbe un messaggio a una crush solo per farsi vedere online?" },
+  { lv: 2, q: "Chi di voi ha già fatto il tenero solo per attirare l'attenzione di qualcuno qui?" },
+  { lv: 2, q: "Chi di voi ha una lista di cotte più lunga di quanto ammetta?" },
+  { lv: 3, q: "Chi di voi ha una cotta segreta che non ha mai confessato a nessuno?" },
+  { lv: 3, q: "Chi di voi cambierebbe programma se sapesse che la sua crush si presenta?" },
+  { lv: 3, q: "Chi di voi ha già mentito su chi gli piace davvero?" },
+  { lv: 3, q: "Chi di voi si è già ingelosito/a per una cotta non corrisposta?" },
+  { lv: 4, q: "Chi di voi ha già provato a rimorchiare l'ex di un amico?" },
+  { lv: 4, q: "Chi di voi confesserebbe una cotta per il/la partner di qualcun altro qui presente?" },
+  { lv: 4, q: "Chi di voi flirterebbe con la crush di un amico pensando di non essere scoperto?" },
+];
+
+const RF_SCELTA_T = 10, RF_CONF_T = 15, RF_VOTE_T = 15, RF_HOTSEAT_T = 30, RF_HOTSEAT_VOTE_T = 12, RF_BLUFF_T = 18, RF_BLUFFVOTE_T = 12;
 
 /** I sei titoli finali, assegnati sulle statistiche raccolte durante la partita. */
 const RF_TITLES = [
@@ -2349,6 +2388,9 @@ function Host({ onExit }) {
   const flowRef = useRef([]), betsRef = useRef({}), posRef = useRef({ b: 0, q: 0 }), cfgRef = useRef({ T, cats }), teamsRef = useRef([]);
   const rfFlowRef = useRef([]), rfPosRef = useRef(0), rfLevelRef = useRef(1);
   const nextingRef = useRef(false);
+  /** protegge ask()/resolve() da doppie esecuzioni quando polling e timer scattano
+   *  quasi in contemporanea sulla stessa fase (gRef.current non è ancora aggiornato). */
+  const advancingRef = useRef(false);
   const tn = (tid) => teamsRef.current.find((t) => t.i === tid)?.name || "Squadra";
   playersRef.current = players; gRef.current = g; rfRef.current = rf; rfLevelRef.current = rfLevel;
   cfgRef.current = { T, cats, pool: D.pool, pmul: D.pmul, diffLabel: D.label, teamMode };
@@ -2661,12 +2703,14 @@ function Host({ onExit }) {
   function buildRfFlow(ps) {
     const confessione = shuffle(ps).map((p) => ({ kind: "confessione", pid: p.id }));
     const hotseat = shuffle(ps).map((p) => ({ kind: "hotseat", pid: p.id }));
+    const bluff = shuffle(ps).map((p) => ({ kind: "bluff", pid: p.id }));
     const extra = Math.max(2, Math.ceil(ps.length / 2));
     const scelta = Array.from({ length: extra }, () => ({ kind: "scelta" }));
     const votoRf = Array.from({ length: extra }, () => ({ kind: "vote", variant: "redflag" }));
+    const votoCrush = Array.from({ length: extra }, () => ({ kind: "vote", variant: "crush" }));
     const caosN = Math.max(1, Math.ceil(ps.length / 3));
     const caos = Array.from({ length: caosN }, () => ({ kind: "vote", variant: "caos" }));
-    return shuffle([...confessione, ...hotseat, ...scelta, ...votoRf, ...caos]);
+    return shuffle([...confessione, ...hotseat, ...bluff, ...scelta, ...votoRf, ...votoCrush, ...caos]);
   }
 
   function startRedFlag() {
@@ -2700,9 +2744,13 @@ function Host({ onExit }) {
     } else if (item.kind === "hotseat") {
       const target = playersRef.current.find((p) => p.id === item.pid);
       state = { mode: "redflag", phase: "rf-hotseat", rid, target: item.pid, targetName: target?.name, time: RF_HOTSEAT_T, livePasses: 0, qn, qtot, level: lv };
+    } else if (item.kind === "bluff") {
+      const target = playersRef.current.find((p) => p.id === item.pid);
+      const card = pickRf("rfBluff", RF_BLUFF.filter((x) => x.lv <= lv), (x) => x.q);
+      state = { mode: "redflag", phase: "rf-bluff", rid, target: item.pid, targetName: target?.name, card, time: RF_BLUFF_T, qn, qtot, level: lv };
     } else {
-      const bank = item.variant === "caos" ? RF_CAOS : RF_VOTE;
-      const key = item.variant === "caos" ? "rfCaos" : "rfVote";
+      const bank = item.variant === "caos" ? RF_CAOS : item.variant === "crush" ? RF_CRUSH : RF_VOTE;
+      const key = item.variant === "caos" ? "rfCaos" : item.variant === "crush" ? "rfCrush" : "rfVote";
       const card = pickRf(key, bank.filter((x) => x.lv <= lv), (x) => x.q);
       state = { mode: "redflag", phase: "rf-vote", rid, variant: item.variant, card, time: RF_VOTE_T, qn, qtot, level: lv };
     }
@@ -2792,6 +2840,25 @@ function Host({ onExit }) {
         ansRef.current = {}; setAnswered({});
         return;
       }
+
+      if (cur.phase === "rf-bluffvote") {
+        const voters = ps.filter((p) => p.id !== cur.target);
+        const tally = { verita: 0, bluff: 0 };
+        voters.forEach((p) => { const v = ansRef.current[p.id]?.guess; if (v === "verita" || v === "bluff") tally[v]++; });
+        const majority = tally.bluff > tally.verita ? "bluff" : "verita";
+        const caught = cur.bluffChoice === "bluff" && majority === "bluff";
+        const gain = caught ? 1 : 0;
+        const updated = ps.map((p) => (p.id === cur.target ? {
+          ...p, flags: (p.flags || 0) + gain,
+          lastBluff: { q: cur.card.q, choice: cur.bluffChoice, caught },
+        } : p));
+        res[cur.target] = { flag: gain, note: caught ? "Beccato/a: bandiera." : cur.bluffChoice === "bluff" ? "Bluff riuscito, nessuna bandiera." : "Creduto/a: nessuna bandiera." };
+        setPlayers(updated);
+        setRf({ ...cur, phase: "rf-bluffres", tally, majority });
+        await push({ mode: "redflag", phase: "rf-bluffres", rid: cur.rid, target: cur.target, targetName: cur.targetName, card: cur.card, bluffChoice: cur.bluffChoice, tally, majority, res, qn: cur.qn, qtot: cur.qtot, players: pub(updated), room });
+        ansRef.current = {}; setAnswered({});
+        return;
+      }
     } finally {
       nextingRef.current = false;
     }
@@ -2807,6 +2874,19 @@ function Host({ onExit }) {
     setLeft(RF_HOTSEAT_VOTE_T);
     ansRef.current = {}; setAnswered({});
     const p = push({ mode: "redflag", phase: "rf-hotseatvote", rid: cur.rid, target: cur.target, targetName: cur.targetName, passes, time: RF_HOTSEAT_VOTE_T, qn: cur.qn, qtot: cur.qtot, players: pub(playersRef.current), room });
+    Promise.resolve(p).finally(() => { nextingRef.current = false; });
+  }
+
+  function beginBluffVote() {
+    if (nextingRef.current) return;
+    nextingRef.current = true;
+    const cur = rfRef.current;
+    const bluffChoice = ansRef.current[cur.target]?.choice ?? "verita";
+    const state = { ...cur, phase: "rf-bluffvote", bluffChoice };
+    setRf(state);
+    setLeft(RF_BLUFFVOTE_T);
+    ansRef.current = {}; setAnswered({});
+    const p = push({ mode: "redflag", phase: "rf-bluffvote", rid: cur.rid, target: cur.target, targetName: cur.targetName, card: cur.card, time: RF_BLUFFVOTE_T, qn: cur.qn, qtot: cur.qtot, players: pub(playersRef.current), room });
     Promise.resolve(p).finally(() => { nextingRef.current = false; });
   }
 
@@ -2840,10 +2920,11 @@ function Host({ onExit }) {
   /* timer Red Flag */
   useEffect(() => {
     if (!rf) return;
-    const timed = ["rf-scelta", "rf-confessione", "rf-vote", "rf-hotseat", "rf-hotseatvote"];
+    const timed = ["rf-scelta", "rf-confessione", "rf-vote", "rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"];
     if (!timed.includes(rf.phase)) return;
     if (left <= 0) {
       if (rf.phase === "rf-hotseat") { beginHotseatVote(); return; }
+      if (rf.phase === "rf-bluff") { beginBluffVote(); return; }
       resolveRf(); return;
     }
     const t = setTimeout(() => setLeft((l) => +(l - HOST_TICK / 1000).toFixed(2)), HOST_TICK);
@@ -2857,7 +2938,7 @@ function Host({ onExit }) {
       const cur = rfRef.current;
       if (!cur) return;
 
-      if (["rf-sceltares", "rf-confres", "rf-voteres", "rf-hotseatres"].includes(cur.phase)) {
+      if (["rf-sceltares", "rf-confres", "rf-voteres", "rf-hotseatres", "rf-bluffres"].includes(cur.phase)) {
         await Promise.all(playersRef.current.map(async (p) => {
           if (ansRef.current[p.id]) return;
           try {
@@ -2947,6 +3028,37 @@ function Host({ onExit }) {
         if (voters.length && voters.every((p) => ansRef.current[p.id])) resolveRf();
         return;
       }
+
+      if (cur.phase === "rf-bluff") {
+        if (!ansRef.current[cur.target]) {
+          try {
+            const r = await storage.get(kPlayer(room, cur.target), true);
+            const d = JSON.parse(r.value);
+            if (d.rid === cur.rid && (d.rfBluff === "verita" || d.rfBluff === "bluff")) {
+              ansRef.current[cur.target] = { choice: d.rfBluff };
+              setAnswered({ [cur.target]: true });
+            }
+          } catch (_) {}
+        }
+        return;
+      }
+
+      if (cur.phase === "rf-bluffvote") {
+        const voters = playersRef.current.filter((p) => p.id !== cur.target);
+        await Promise.all(voters.map(async (p) => {
+          if (ansRef.current[p.id]) return;
+          try {
+            const r = await storage.get(kPlayer(room, p.id), true);
+            const d = JSON.parse(r.value);
+            if (d.rid === cur.rid && (d.rfBluffGuess === "verita" || d.rfBluffGuess === "bluff")) {
+              ansRef.current[p.id] = { guess: d.rfBluffGuess };
+              setAnswered((a) => ({ ...a, [p.id]: true }));
+            }
+          } catch (_) {}
+        }));
+        if (voters.length && voters.every((p) => ansRef.current[p.id])) resolveRf();
+        return;
+      }
     }, POLL_HOST);
     return () => clearInterval(t);
   }, [screen, room]); // eslint-disable-line
@@ -3014,6 +3126,9 @@ function Host({ onExit }) {
   }
 
   async function ask(bi, qi) {
+    if (advancingRef.current) return;
+    advancingRef.current = true;
+    try {
     posRef.current = { b: bi, q: qi };
     const b = flowRef.current[bi];
     ansRef.current = {};
@@ -3159,9 +3274,13 @@ function Host({ onExit }) {
     setLeft(b.kind === "mg" && b.mg === "lampo" ? Math.max(6, Math.round(T / 2)) : T);
     const pubQ = { q: q.q, a: q.a, clues: q.clues, unit: q.unit };
     await push({ ...state, perC: undefined, perF: undefined, q: pubQ, players: pub(playersRef.current), room });
+    } finally { advancingRef.current = false; }
   }
 
   async function resolve() {
+    if (advancingRef.current) return;
+    advancingRef.current = true;
+    try {
     const cur = gRef.current;
     if (!cur || (cur.phase !== "quiz" && cur.phase !== "vote" && cur.phase !== "puzzle" && cur.phase !== "azzardo" && cur.phase !== "spicy")) return;
     const ps = playersRef.current;
@@ -3476,6 +3595,7 @@ function Host({ onExit }) {
     setOutcome(res);
     await push({ phase: "result", rid: cur.rid, cat: cur.cat, rule: cur.rule, spin: cur.spin || null, blockLabel: cur.blockLabel, q: { q: cur.q.q, a: cur.q.a, c: cur.q.c, f: cur.q.f }, res, players: pub(updated), room });
     ansRef.current = {}; setAnswered({});
+    } finally { advancingRef.current = false; }
   }
 
   function next() {
@@ -3551,6 +3671,8 @@ function HostSetup({ partyType, setPartyType, mode, setMode, diff, setDiff, team
       ["Confessione", "Una domanda solo a te. Rispondi, o «Passo» e ti prendi la bandiera."],
       ["Chi è la Red Flag", "Voto segreto su un membro del gruppo. Chi vince la votazione incassa una bandiera."],
       ["Hot Seat", "30 secondi sotto tiro. 3 pass gratis, poi ogni pass è una bandiera. Alla fine si vota: assolto o red flag."],
+      ["Bluff", "Rispondi a voce, deciso in segreto: verità o bugia? Il gruppo vota se ci ha creduto. Beccato = bandiera."],
+      ["Crush", "Come Chi è la Red Flag, ma sul tema cotte e attrazione nel gruppo."],
       ["Caos", "Carta pescata a caso, tutti votano insieme: nessuno è al sicuro."],
     ];
     return (
@@ -3582,7 +3704,6 @@ function HostSetup({ partyType, setPartyType, mode, setMode, diff, setDiff, team
             {cats.map(([t, d]) => (
               <p key={t} className="border-l-4 pl-3" style={{ borderColor: C.gold }}><b style={{ color: C.gold }}>{t}</b> — {d}</p>
             ))}
-            <p className="text-xs opacity-60">Bluff e Crush sono in arrivo in un prossimo aggiornamento.</p>
             <p className="text-xs opacity-60">Alla fine: classifica per bandiere, sei titoli e un report individuale sul telefono di ognuno.</p>
           </div>
         </div>
@@ -3727,7 +3848,7 @@ function HostLobby({ room, players, canStart, onStart, err, M, D, T, teamMode, t
       <p className="text-xs font-bold uppercase tracking-widest" style={{ color: isRf ? C.flagRed : C.lime }}>
         {isRf
           ? "Stanza aperta · 🚩 red flag · scelte, confessioni, voti e hot seat · vince chi ha meno bandiere"
-          : `Stanza aperta · ${M.label.toLowerCase()} · livello ${D.label.toLowerCase()} · ${T}s a domanda · ${teamMode === "squadre" ? `${teamsList.length || "nessuna"} squadra${teamsList.length === 1 ? "" : "e"} fondate` : "una squadra a testa"} · ${M.own} domande per squadra + ${M.mgs} minigiochi`}
+          : `Stanza aperta · ${M.label.toLowerCase()} · livello ${D.label.toLowerCase()} · ${T}s a domanda · ${teamMode === "squadre" ? (teamsList.length === 0 ? "nessuna squadra fondata" : teamsList.length === 1 ? "1 squadra fondata" : `${teamsList.length} squadre fondate`) : "una squadra a testa"} · ${M.own} domande per squadra + ${M.mgs} minigiochi`}
       </p>
       <div className="mt-2 flex flex-wrap items-end gap-6">
         <div>
@@ -4342,20 +4463,24 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
     if (seenRef.current.key === key) return;
     seenRef.current.key = key;
     if (["rf-scelta", "rf-vote"].includes(rf.phase)) sfx.whoosh();
-    else if (rf.phase === "rf-confessione" || rf.phase === "rf-hotseat") { sfx.whoosh(); sfx.rfPulse(); }
-    else if (rf.phase === "rf-hotseatvote") sfx.whoosh();
+    else if (rf.phase === "rf-confessione" || rf.phase === "rf-hotseat" || rf.phase === "rf-bluff") { sfx.whoosh(); sfx.rfPulse(); }
+    else if (rf.phase === "rf-hotseatvote" || rf.phase === "rf-bluffvote") sfx.whoosh();
     else if (rf.phase === "rf-sceltares" || rf.phase === "rf-voteres") sfx.reveal();
     else if (rf.phase === "rf-confres") (rf.passed ? sfx.rfGuilty() : sfx.rfInnocent());
     else if (rf.phase === "rf-hotseatres") {
       sfx.rfDrumroll();
       setTimeout(() => (rf.verdict === "redflag" ? sfx.rfGuilty() : sfx.rfInnocent()), 1350);
     }
+    else if (rf.phase === "rf-bluffres") {
+      sfx.rfDrumroll();
+      setTimeout(() => (rf.majority === "bluff" ? sfx.rfGuilty() : sfx.rfInnocent()), 1350);
+    }
     else if (rf.phase === "rf-report") sfx.podium();
   }, [rf?.phase, rf?.rid]); // eslint-disable-line
 
   /* battito di tensione negli ultimi secondi */
   useEffect(() => {
-    if (!rf || !["rf-confessione", "rf-hotseat", "rf-hotseatvote"].includes(rf.phase)) return;
+    if (!rf || !["rf-confessione", "rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"].includes(rf.phase)) return;
     const secs = Math.ceil(left);
     if (secs === seenRef.current.tickAt) return;
     seenRef.current.tickAt = secs;
@@ -4364,8 +4489,8 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
 
   if (!rf) return null;
   const goNext = () => { sfx.select(); next(); };
-  const timed = ["rf-scelta", "rf-confessione", "rf-vote", "rf-hotseat", "rf-hotseatvote"].includes(rf.phase);
-  const voters = rf.phase === "rf-hotseatvote" ? Math.max(1, players.length - 1) : players.length;
+  const timed = ["rf-scelta", "rf-confessione", "rf-vote", "rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"].includes(rf.phase);
+  const voters = rf.phase === "rf-hotseatvote" || rf.phase === "rf-bluffvote" ? Math.max(1, players.length - 1) : players.length;
   const lowTime = timed && left < 5;
 
   return (
@@ -4452,8 +4577,8 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
 
       {rf.phase === "rf-vote" && (
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
-          <span className="-rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: rf.variant === "caos" ? C.arancio : C.flagRed, color: rf.variant === "caos" ? C.ink : C.cream }}>
-            {rf.variant === "caos" ? "Caos" : "Chi è la Red Flag"}
+          <span className="-rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: rf.variant === "caos" ? C.arancio : rf.variant === "crush" ? C.magenta : C.flagRed, color: rf.variant === "caos" ? C.ink : C.cream }}>
+            {rf.variant === "caos" ? "Caos" : rf.variant === "crush" ? "Crush" : "Chi è la Red Flag"}
           </span>
           <div className="mt-4 w-full max-w-2xl border-4 border-dashed p-8" style={{ borderColor: "rgba(255,31,61,.4)" }}>
             <p className="text-sm font-bold uppercase" style={{ color: C.flagRed }}>🫣 Voti chiusi</p>
@@ -4516,6 +4641,41 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
             <p className="text-5xl uppercase" style={display}>{rf.verdict === "redflag" ? "🚩 Red Flag" : "Assolto"}</p>
           </div>
           <p className="mt-3 text-sm font-bold opacity-70">{rf.tally.redflag} contro {rf.tally.assolto}{rf.passExtra > 0 ? ` · +${rf.passExtra} 🚩 dai pass extra` : ""}</p>
+          <p className="mt-6 text-center text-sm opacity-60">{Object.keys(answered).length}/{voters} pronti per continuare</p>
+          <button onClick={goNext} className="press mt-2 w-full max-w-2xl py-5 text-3xl uppercase" style={{ ...display, background: C.flagRed, color: C.cream, boxShadow: `6px 6px 0 ${C.ink2}` }}>
+            {rf.qn >= rf.qtot ? "Verdetto finale" : "Avanti"}
+          </button>
+        </div>
+      )}
+
+      {rf.phase === "rf-bluff" && (
+        <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
+          <span className={`pop -rotate-1 px-3 py-1 text-xs font-bold uppercase ${lowTime ? "buzzer-hot" : ""}`} style={{ background: C.flagRed, color: C.cream }}>🎭 Bluff</span>
+          <p className="pop glow my-4 text-7xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
+          <p className="max-w-xl text-lg opacity-70">Sta decidendo in segreto se dire la verità o bluffare, poi lo dice a voce. Il gruppo vota subito dopo.</p>
+        </div>
+      )}
+
+      {rf.phase === "rf-bluffvote" && (
+        <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
+          <p className="text-xs uppercase tracking-widest opacity-60">Verità o bluff?</p>
+          <p className="pop glow text-6xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
+          <p className="mt-2 max-w-xl text-sm opacity-70">{rf.card?.q}</p>
+          <p className="mt-6 text-sm opacity-60">{Object.keys(answered).length}/{voters} hanno votato</p>
+        </div>
+      )}
+
+      {rf.phase === "rf-bluffres" && (
+        <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
+          <p className="text-4xl uppercase" style={{ ...display, color: C.cream }}>{rf.targetName}</p>
+          <p className="mt-2 max-w-xl text-sm opacity-70">{rf.card?.q}</p>
+          <div className={`stamp-in mt-6 inline-block -rotate-1 border-4 px-10 py-5 ${rf.bluffChoice === "bluff" && rf.majority === "bluff" ? "shake" : ""}`} style={{ borderColor: rf.bluffChoice === "bluff" ? C.flagRed : C.lime, color: rf.bluffChoice === "bluff" ? C.flagRed : C.lime }}>
+            <p className="text-5xl uppercase" style={display}>{rf.bluffChoice === "bluff" ? "Era un bluff" : "Era vero"}</p>
+          </div>
+          <p className="mt-3 text-sm font-bold opacity-70">Il gruppo ha detto: {rf.majority === "bluff" ? "bluff" : "verità"} · {rf.tally.bluff} contro {rf.tally.verita}</p>
+          <p className="mt-1 text-sm font-bold" style={{ color: rf.bluffChoice === "bluff" && rf.majority === "bluff" ? C.flagRed : C.lime }}>
+            {rf.bluffChoice === "bluff" && rf.majority === "bluff" ? "🚩 Beccato/a" : rf.bluffChoice === "bluff" ? "Bluff riuscito" : "Creduto/a"}
+          </p>
           <p className="mt-6 text-center text-sm opacity-60">{Object.keys(answered).length}/{voters} pronti per continuare</p>
           <button onClick={goNext} className="press mt-2 w-full max-w-2xl py-5 text-3xl uppercase" style={{ ...display, background: C.flagRed, color: C.cream, boxShadow: `6px 6px 0 ${C.ink2}` }}>
             {rf.qn >= rf.qtot ? "Verdetto finale" : "Avanti"}
@@ -4785,10 +4945,10 @@ function PuzzleRound({ s, id, write }) {
 function Player({ onExit }) {
   const [id] = useState(() => {
     try {
-      const saved = localStorage.getItem("cultrash:pid");
+      const saved = sessionStorage.getItem("cultrash:pid");
       if (saved) return saved;
       const fresh = uid();
-      localStorage.setItem("cultrash:pid", fresh);
+      sessionStorage.setItem("cultrash:pid", fresh);
       return fresh;
     } catch (_) { return uid(); }
   });
@@ -4828,7 +4988,7 @@ function Player({ onExit }) {
         const st = JSON.parse(r.value);
         setS(st);
         setMsg("");
-        if ((st.phase === "quiz" || st.phase === "vote" || st.phase === "choose" || st.phase === "spicy" || st.phase === "bet" || st.phase === "rf-scelta" || st.phase === "rf-confessione" || st.phase === "rf-vote" || st.phase === "rf-hotseat" || st.phase === "rf-hotseatvote") && st.rid !== ridRef.current) {
+        if ((st.phase === "quiz" || st.phase === "vote" || st.phase === "choose" || st.phase === "spicy" || st.phase === "bet" || st.phase === "rf-scelta" || st.phase === "rf-confessione" || st.phase === "rf-vote" || st.phase === "rf-hotseat" || st.phase === "rf-hotseatvote" || st.phase === "rf-bluff" || st.phase === "rf-bluffvote") && st.rid !== ridRef.current) {
           ridRef.current = st.rid;
           startRef.current = Date.now();
           setAnswer(null); setRisk(false); setNumGuess(""); setClueStep(0); setPendAns(null); setReady(false); setHotPasses(0);
@@ -4930,6 +5090,18 @@ function Player({ onExit }) {
     if (answer !== null || s?.phase !== "rf-hotseatvote") return;
     setAnswer(v);
     const ok = await write({ rid: s.rid, rfJudge: v });
+    if (!ok) setAnswer(null);
+  }
+  async function sendRfBluff(choice) {
+    if (answer !== null || s?.phase !== "rf-bluff") return;
+    setAnswer(choice);
+    const ok = await write({ rid: s.rid, rfBluff: choice });
+    if (!ok) setAnswer(null);
+  }
+  async function sendRfBluffGuess(choice) {
+    if (answer !== null || s?.phase !== "rf-bluffvote") return;
+    setAnswer(choice);
+    const ok = await write({ rid: s.rid, rfBluffGuess: choice });
     if (!ok) setAnswer(null);
   }
   async function sendPick(cat) {
@@ -5432,8 +5604,8 @@ function Player({ onExit }) {
 
       {s?.phase === "rf-vote" && (
         <div className="tvin flex flex-1 flex-col">
-          <span className="buzzer-hot mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: C.flagRed, color: C.cream }}>
-            🔒 {s.variant === "caos" ? "Caos" : "Chi è la Red Flag"}
+          <span className="buzzer-hot mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: s.variant === "crush" ? C.magenta : C.flagRed, color: C.cream }}>
+            🔒 {s.variant === "caos" ? "Caos" : s.variant === "crush" ? "Crush" : "Chi è la Red Flag"}
           </span>
           <p className="mb-3 text-base font-bold leading-snug">{s.card?.q}</p>
           <div className="flex flex-1 flex-col gap-2">
@@ -5528,6 +5700,78 @@ function Player({ onExit }) {
         </div>
       )}
 
+      {s?.phase === "rf-bluff" && (
+        s.target === id ? (
+          <div className="tvin flex flex-1 flex-col">
+            <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: C.flagRed, color: C.cream }}>🎭 Bluff</span>
+            <p className="mb-4 text-lg font-bold leading-snug">{s.card?.q}</p>
+            <p className="mb-4 text-xs opacity-60">Scegli in segreto, poi rispondi a voce di conseguenza.</p>
+            <div className="flex flex-1 flex-col gap-3">
+              <button onClick={() => sendRfBluff("verita")} disabled={answer !== null}
+                className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${answer === "verita" ? "bump" : ""}`}
+                style={{ background: answer === "verita" ? C.cream : C.lime, color: C.ink, opacity: answer !== null && answer !== "verita" ? 0.25 : 1, boxShadow: answer !== null ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
+                Dico la verità
+              </button>
+              <button onClick={() => sendRfBluff("bluff")} disabled={answer !== null}
+                className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${answer === "bluff" ? "bump" : ""}`}
+                style={{ background: answer === "bluff" ? C.cream : C.flagRed, color: C.cream, opacity: answer !== null && answer !== "bluff" ? 0.25 : 1, boxShadow: answer !== null ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
+                Bluffo
+              </button>
+            </div>
+            {answer && <p className="mt-2 text-center text-sm opacity-70">Deciso. Ora dillo al gruppo.</p>}
+          </div>
+        ) : (
+          <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
+            <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: "rgba(255,31,61,.15)", color: C.flagRed }}>🎭 Bluff</span>
+            <p className="text-2xl font-bold" style={{ color: C.flagRed }}>{s.targetName}</p>
+            <p className="mt-2 max-w-xs text-sm opacity-70">Sta decidendo sul suo telefono. Ascolta cosa dice a voce: dovrai giudicare.</p>
+          </div>
+        )
+      )}
+
+      {s?.phase === "rf-bluffvote" && (
+        s.target === id ? (
+          <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
+            <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: "rgba(255,31,61,.15)", color: C.flagRed }}>Il gruppo giudica</span>
+            <p className="mt-1 max-w-xs text-lg font-bold opacity-80">Non puoi votare su di te. Aspetta il verdetto.</p>
+          </div>
+        ) : (
+          <div className="tvin flex flex-1 flex-col">
+            <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: "rgba(255,31,61,.15)", color: C.flagRed }}>Verità o bluff, per {s.targetName}?</span>
+            <p className="mb-3 text-sm opacity-70">{s.card?.q}</p>
+            <div className="flex flex-1 flex-col gap-3">
+              <button onClick={() => sendRfBluffGuess("verita")} disabled={answer !== null}
+                className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${answer === "verita" ? "bump" : ""}`}
+                style={{ background: answer === "verita" ? C.cream : C.lime, color: C.ink, opacity: answer !== null && answer !== "verita" ? 0.25 : 1, boxShadow: answer !== null ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
+                Vero
+              </button>
+              <button onClick={() => sendRfBluffGuess("bluff")} disabled={answer !== null}
+                className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${answer === "bluff" ? "bump" : ""}`}
+                style={{ background: answer === "bluff" ? C.cream : C.flagRed, color: C.cream, opacity: answer !== null && answer !== "bluff" ? 0.25 : 1, boxShadow: answer !== null ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
+                Bluff
+              </button>
+            </div>
+            {answer && <p className="mt-2 text-center text-sm opacity-70">Giudizio espresso.</p>}
+          </div>
+        )
+      )}
+
+      {s?.phase === "rf-bluffres" && (
+        <div key={s.rid} className="tvin flex flex-1 flex-col justify-center text-center">
+          <p className="text-xs uppercase tracking-widest opacity-60">{s.targetName}</p>
+          <p className="my-2 text-3xl uppercase" style={{ ...display, color: s.bluffChoice === "bluff" ? C.flagRed : C.lime }}>
+            {s.bluffChoice === "bluff" ? "Era un bluff" : "Era vero"}
+          </p>
+          {s.target === id && mine && (
+            <p className="mt-2 text-sm font-bold" style={{ color: mine.flag ? C.flagRed : C.lime }}>{mine.note}</p>
+          )}
+          <button onClick={sendReady} disabled={ready} className="press mt-6 w-full py-4 text-xl uppercase"
+            style={{ ...display, background: ready ? "rgba(255,243,230,.12)" : C.flagRed, color: ready ? "rgba(255,243,230,.5)" : C.cream }}>
+            {ready ? "Aspettando gli altri…" : "Avanti"}
+          </button>
+        </div>
+      )}
+
       {s?.phase === "rf-report" && (() => {
         const rank = [...(s.players || [])].sort((a, b) => (a.flags || 0) - (b.flags || 0));
         const pos = rank.findIndex((p) => p.id === id) + 1;
@@ -5535,6 +5779,7 @@ function Player({ onExit }) {
         const moments = [];
         if (me?.lastConfessione) moments.push(`«${me.lastConfessione.q}» — ${me.lastConfessione.confessed ? "hai confessato" : "hai passato"}.`);
         if (me?.lastHotseat) moments.push(`Hot Seat: verdetto ${me.lastHotseat.verdict === "redflag" ? "Red Flag" : "assolto"}, ${me.lastHotseat.passes} pass.`);
+        if (me?.lastBluff) moments.push(`«${me.lastBluff.q}» — ${me.lastBluff.choice === "bluff" ? "hai bluffato" : "hai detto la verità"}, ${me.lastBluff.caught ? "e ti hanno beccato" : "e te la sei cavata"}.`);
         if (me?.votedAgainst) moments.push(`«${me.votedAgainst.q}» — ${me.votedAgainst.votes} voti contro di te.`);
         return (
           <div className="tvin flex flex-1 flex-col justify-center text-center">

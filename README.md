@@ -3,8 +3,13 @@
 Quiz di gruppo all'italiana: **lo schermo grande sta sul computer, i telefoni fanno da buzzer**.
 Si apre una stanza, gli altri entrano con un codice di quattro lettere e si gioca.
 
-Cinque categorie — musica, sport, trash, cultura, piccante — e diciannove minigiochi
-con meccaniche diverse fra loro: nessuno è la stessa domanda con un punteggio ridipinto.
+Otto categorie — musica, sport, trash, cultura, cibo & cucina, cinema, gaming, piccante — e
+diciannove minigiochi con meccaniche diverse fra loro: nessuno è la stessa domanda con un
+punteggio ridipinto.
+
+C'è anche una seconda modalità di serata, **Red Flag** (scelte, confessioni, voti e hot seat:
+vince chi accumula meno bandiere rosse), selezionabile dalla stessa schermata di setup accanto
+al Quiz Classico.
 
 ---
 
@@ -13,7 +18,7 @@ con meccaniche diverse fra loro: nessuno è la stessa domanda con un punteggio r
 1. Sul computer: apri l'app, scegli **Schermo principale**, imposta durata, difficoltà e formazione.
 2. Compare un **codice di quattro lettere**. Manda il link dell'app agli altri.
 3. Sul telefono: **Sono un giocatore**, codice, nome. In modalità squadre uno la fonda col nome che vuole e gli altri ci entrano.
-4. **Round 1** — ognuno (o ogni squadra) sceglie la propria categoria: lì vale ×2, gli altri prendono metà punti.
+4. **Round 1** — ognuno (o ogni squadra) sceglie la propria categoria: lì vale ×2, gli altri prendono metà punti. Prima di rispondere si può anche attivare il rischio (dal telefono): raddoppia il punteggio se giusta, −75 se sbagliata.
 5. Poi partono i minigiochi, estratti a caso a ogni partita.
 
 ### I minigiochi
@@ -41,9 +46,9 @@ con meccaniche diverse fra loro: nessuno è la stessa domanda con un punteggio r
 | Il pezzo mancante *(squadre)* | puzzle sul telefono, lettere, la squadra ricompone la parola |
 
 **Sui round d'azzardo:** si scommettono soltanto i punti della partita. Non esistono denaro,
-acquisti né premi reali; la puntata è limitata ai punti che hai e il punteggio non scende mai
-sotto zero. Se il gioco finisce in mano a ragazzini, la sezione si può togliere in due righe
-(vedi *Personalizzare*).
+acquisti né premi reali; anche a zero punti si può sempre puntare il minimo (50), così nessuno
+resta escluso dai round d'azzardo, e il punteggio non scende mai sotto zero. Se il gioco finisce
+in mano a ragazzini, la sezione si può togliere in due righe (vedi *Personalizzare*).
 
 ---
 

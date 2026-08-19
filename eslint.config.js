@@ -3,7 +3,7 @@ import react from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 
 const globaliBrowser = {
-  window: "readonly", document: "readonly", localStorage: "readonly",
+  window: "readonly", document: "readonly", localStorage: "readonly", sessionStorage: "readonly",
   BroadcastChannel: "readonly", console: "readonly", fetch: "readonly",
   setTimeout: "readonly", clearTimeout: "readonly",
   setInterval: "readonly", clearInterval: "readonly",

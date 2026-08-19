@@ -16,7 +16,16 @@ export const encW = (w) => btoa(w.split("").reverse().join(""));
 export const decW = (e) => { try { return atob(e).split("").reverse().join(""); } catch (_) { return ""; } };
 
 export const pick = (a) => a[Math.floor(Math.random() * a.length)];
-export const shuffle = (a) => [...a].sort(() => Math.random() - 0.5);
+/** Fisher-Yates: a differenza di sort(() => Math.random()-0.5), distribuisce
+ *  ogni permutazione con probabilità uniforme. */
+export const shuffle = (a) => {
+  const out = [...a];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+};
 
 /** Chiavi dello spazio condiviso: una per lo stato partita, una per giocatore. */
 export const kState = (r) => `cultrash:${r}:state`;
