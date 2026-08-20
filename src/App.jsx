@@ -1,6 +1,7 @@
 import { storage } from "./sync";
 import { pick, shuffle, kState, kPlayer, pPrefix, code, uid, encW, decW, rouColore, scrambleTiles, matchGuess } from "./game/utils";
 import { pickQuestion, pickCategory, createSession } from "./game/questionEngine";
+import { simulateRace } from "./game/raceSim";
 import { sfx } from "./game/sound";
 import { narrate, stopNarration } from "./game/narrator";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -85,6 +86,23 @@ const PUZZLE_T = 100;
 const BET_T = 15;
 const BET_OPTS = [50, 150, 300];
 const AZZ_T = 25;
+/** Tempi della presentazione dei tre round d'azzardo: il risultato logico
+ *  (chi vince, che numero esce, quale casella è quella storta) è sempre già
+ *  deciso da resolve() PRIMA che questi timer partano — servono solo a
+ *  scandire quanto dura la messinscena prima di mostrare punti e "Avanti",
+ *  perché non ci sia più suspense nell'istante in cui parte l'animazione. */
+const RACE_COUNTDOWN_MS = 1900;
+const RACE_RUN_MS = 5600;
+const RACE_REVEAL_MS = RACE_COUNTDOWN_MS + RACE_RUN_MS + 500;
+const ROULETTE_SPIN_MS = 3400;
+const ROULETTE_BALL_MS = 1700;
+const ROULETTE_REVEAL_MS = ROULETTE_SPIN_MS + ROULETTE_BALL_MS + 400;
+const RUSSA_TENSION_MS = 2200;
+const RUSSA_HUSH_MS = 650;
+const RUSSA_FLIP_GAP_MS = 240;
+const RUSSA_PRE_FLIP_MS = 120;
+const RUSSA_SETTLE_MS = 400;
+const RUSSA_REVEAL_MS = RUSSA_TENSION_MS + RUSSA_HUSH_MS + RUSSA_PRE_FLIP_MS + RUSSA_FLIP_GAP_MS * 6 + RUSSA_SETTLE_MS;
 const MUSIC_T = 60;
 const MUSIC_CLIP = 10;
 const MUSIC_EXT = 20;
@@ -2150,6 +2168,12 @@ function Presenter({ talking = false, color = C.gold, size = 132 }) {
 
 /** Ruota della roulette vera: 13 spicchi colorati, freccia fissa in alto.
  *  In attesa gira piano; alla rivelazione accelera e si ferma sul numero uscito. */
+/** Ruota + pallina indipendenti: la ruota porta il numero vincente (già
+ *  deciso da resolve(), mai dedotto dall'animazione) sotto il puntatore
+ *  fisso con un'unica curva di decelerazione; la pallina gira in senso
+ *  opposto e più veloce, poi rallenta a scatti verso il centro — ogni scatto
+ *  è un rimbalzo udibile — fino a fermarsi. Il numero si illumina solo a
+ *  pallina ferma, mai prima. */
 function RouletteWheel({ numero, spinning, accent }) {
   const SEG = 13;
   const seg = 360 / SEG;
@@ -2158,14 +2182,57 @@ function RouletteWheel({ numero, spinning, accent }) {
     return 360 * 5 + (360 - (numero * seg + seg / 2));
   }, [numero]); // eslint-disable-line
   const [angle, setAngle] = useState(0);
+  const [ball, setBall] = useState({ angle: 0, radius: 100, duration: 0 });
+  const [settled, setSettled] = useState(false);
+  const tickRef = useRef(null);
 
   useEffect(() => {
-    if (spinning && numero != null) {
-      setAngle(0);
-      const t = setTimeout(() => setAngle(targetAngle), 40);
-      return () => clearTimeout(t);
+    if (!spinning || numero == null) {
+      setAngle(0); setBall({ angle: 0, radius: 100, duration: 0 }); setSettled(false);
+      return;
     }
-    setAngle(0);
+    setAngle(0); setSettled(false);
+    const t0 = setTimeout(() => setAngle(targetAngle), 40);
+
+    // La pallina prosegue sempre nello stesso verso (mai un salto d'angolo
+    // interpretabile come inversione): gira veloce, poi rallenta a scatti
+    // sempre più corti mentre scende verso la pista interna.
+    const base = -360 * 6;
+    const steps = [
+      { d: 0, dur: ROULETTE_SPIN_MS / 1000, radius: 100 },
+      { d: -130, dur: 0.5, radius: 62 },
+      { d: -70, dur: 0.4, radius: 50 },
+      { d: -32, dur: 0.32, radius: 43 },
+      { d: -10, dur: 0.26, radius: 40 },
+    ];
+    let cum = base, delay = 60;
+    const timers = [];
+    steps.forEach((s, i) => {
+      cum += s.d;
+      const angleAtStep = cum;
+      timers.push(setTimeout(() => {
+        setBall({ angle: angleAtStep, radius: s.radius, duration: s.dur });
+        if (i > 0) sfx.ballBounce();
+      }, delay));
+      delay += s.dur * 1000 + (i === 0 ? 0 : 60);
+    });
+    const settleT = setTimeout(() => setSettled(true), ROULETTE_SPIN_MS + ROULETTE_BALL_MS);
+
+    // Tick della ruota: cadenza che si dirada avvicinandosi all'arresto —
+    // il suono principale della decelerazione, non solo la pallina.
+    let n = 0;
+    const scheduleTick = () => {
+      n++;
+      const gap = 85 + n * 20;
+      tickRef.current = setTimeout(() => {
+        if (n > 24) return;
+        sfx.wheelTick();
+        scheduleTick();
+      }, gap);
+    };
+    scheduleTick();
+
+    return () => { clearTimeout(t0); clearTimeout(settleT); clearTimeout(tickRef.current); timers.forEach(clearTimeout); };
   }, [spinning, numero, targetAngle]);
 
   const wedges = Array.from({ length: SEG }, (_, n) => {
@@ -2183,15 +2250,26 @@ function RouletteWheel({ numero, spinning, accent }) {
         position: "absolute", inset: 0, borderRadius: "9999px", overflow: "hidden",
         background: `conic-gradient(${wedges})`,
         transform: `rotate(${angle}deg)`,
-        transition: spinning ? "transform 3.2s cubic-bezier(.13,.85,.18,1)" : "none",
-        boxShadow: "inset 0 0 0 2px rgba(255,243,230,.3), inset 0 0 18px rgba(0,0,0,.5)",
+        transition: spinning ? `transform ${ROULETTE_SPIN_MS / 1000}s cubic-bezier(.13,.85,.18,1)` : "none",
+        boxShadow: settled
+          ? `inset 0 0 0 2px ${accent}, inset 0 0 24px rgba(255,201,60,.6), 0 0 22px ${accent}`
+          : "inset 0 0 0 2px rgba(255,243,230,.3), inset 0 0 18px rgba(0,0,0,.5)",
       }}>
         {Array.from({ length: SEG }, (_, n) => (
           <div key={n} className="absolute inset-0" style={{ transform: `rotate(${n * seg + seg / 2}deg)` }}>
-            <span className="absolute left-1/2 top-2 -translate-x-1/2 text-sm font-bold" style={{ color: C.cream, fontFamily: display.fontFamily, textShadow: "0 1px 2px rgba(0,0,0,.6)" }}>{n}</span>
+            <span className={`absolute left-1/2 top-2 -translate-x-1/2 text-sm font-bold ${settled && n === numero ? "pop" : ""}`}
+              style={{ color: settled && n === numero ? C.gold : C.cream, fontFamily: display.fontFamily, textShadow: settled && n === numero ? `0 0 8px ${C.gold}` : "0 1px 2px rgba(0,0,0,.6)" }}>{n}</span>
           </div>
         ))}
       </div>
+      <div aria-hidden className="absolute rounded-full" style={{
+        left: "50%", top: "50%", width: 12, height: 12, zIndex: 5,
+        transform: `translate(-50%,-50%) rotate(${ball.angle}deg) translateY(-${ball.radius}px)`,
+        transition: ball.duration ? `transform ${ball.duration}s cubic-bezier(.32,.6,.22,1)` : "none",
+        background: "radial-gradient(circle at 35% 30%, #fff, #d8d8d8 65%, #8a8a8a)",
+        boxShadow: "0 2px 5px rgba(0,0,0,.6)",
+        opacity: spinning || settled ? 1 : 0,
+      }} />
       <div aria-hidden className="absolute rounded-full" style={{
         left: "50%", top: "50%", width: 42, height: 42, transform: "translate(-50%,-50%)",
         background: "radial-gradient(circle at 35% 30%, #FFE7A8, #FFC93C 55%, #a9791c 100%)",
@@ -2207,32 +2285,97 @@ function RouletteWheel({ numero, spinning, accent }) {
 }
 
 /** Pista dei cavalli: gate di partenza, corsia con erba a righe, traguardo a
- *  scacchi. In attesa i cavalli scalpitano ai blocchi; alla rivelazione
- *  corrono e chi ha vinto (deciso dalla logica di gioco) arriva sempre avanti. */
+ *  scacchi. La corsa è precalcolata da simulateRace() (chi vince è deciso
+ *  dalla logica di gioco, per quota — mai da come va l'animazione) e poi
+ *  riprodotta con un unico game loop (requestAnimationFrame) che sposta i
+ *  cavalli scrivendo direttamente sullo stile del DOM: niente stato React
+ *  per frame, per restare fluido anche su schermi modesti. */
 function HorseRace({ cavalli, winner, racing }) {
-  const [go, setGo] = useState(false);
-  const [via, setVia] = useState(false);
-  const targets = useMemo(() => cavalli.map((c, i) => (
-    i === winner
-      ? { dist: 88 + Math.random() * 5, dur: 2.1 + Math.random() * 0.35 }
-      : { dist: 42 + Math.random() * 36, dur: 1.7 + Math.random() * 0.6 }
-  )), [winner]); // eslint-disable-line
+  const [stage, setStage] = useState("idle"); // idle | count | via | racing | done
+  const [count, setCount] = useState(3);
+  const [caption, setCaption] = useState(null);
+  const [ranks, setRanks] = useState(() => cavalli.map((_, i) => i + 1));
+  const laneRefs = useRef([]);
+  const raceRef = useRef(null);
+  const rafRef = useRef(null);
+  const hoofAtRef = useRef(0);
+  const firedRef = useRef(new Set());
+  const captionTORef = useRef(null);
 
   useEffect(() => {
-    if (racing && winner != null) {
-      setGo(false); setVia(false);
-      const t1 = setTimeout(() => { setGo(true); setVia(true); }, 260);
-      const t2 = setTimeout(() => setVia(false), 1050);
-      return () => { clearTimeout(t1); clearTimeout(t2); };
-    }
-    setGo(false); setVia(false);
-  }, [racing, winner]);
+    if (!racing || winner == null) { setStage("idle"); return; }
+    raceRef.current = simulateRace(cavalli, winner);
+    firedRef.current = new Set();
+    setCaption(null);
+    setStage("count");
+    setCount(3);
+
+    const timers = [];
+    [2, 1].forEach((n, i) => timers.push(setTimeout(() => setCount(n), (i + 1) * 420)));
+    timers.push(setTimeout(() => { setStage("via"); sfx.raceStart(); }, 1260));
+    timers.push(setTimeout(() => setStage("racing"), RACE_COUNTDOWN_MS));
+
+    return () => { timers.forEach(clearTimeout); cancelAnimationFrame(rafRef.current); };
+  }, [racing, winner]); // eslint-disable-line
+
+  useEffect(() => {
+    if (stage !== "racing") return;
+    const race = raceRef.current;
+    const t0 = performance.now();
+    const loop = (now) => {
+      const progress = Math.min(1, (now - t0) / RACE_RUN_MS);
+      const tickF = progress * race.ticks;
+      const t0i = Math.min(race.ticks, Math.floor(tickF));
+      const t1i = Math.min(race.ticks, t0i + 1);
+      const frac = tickF - t0i;
+      const a = race.frames[t0i], b = race.frames[t1i];
+      const positions = cavalli.map((_, i) => a[i] + (b[i] - a[i]) * frac);
+      positions.forEach((p, i) => {
+        const el = laneRefs.current[i];
+        if (el) el.style.left = `${2 + p * 88}%`;
+      });
+      if (now - hoofAtRef.current > 150) { hoofAtRef.current = now; sfx.hoofbeat(); }
+
+      race.events.forEach((ev) => {
+        if (firedRef.current.has(ev)) return;
+        if (progress >= ev.tick / race.ticks) {
+          firedRef.current.add(ev);
+          const nome = cavalli[ev.horse]?.nome;
+          if (ev.type === "sorpasso" && progress < 0.94) { setCaption(`Sorpasso di ${nome}!`); sfx.whoosh(); }
+          else if (ev.type === "sprint") setCaption(`${nome} scatta!`);
+          else if (ev.type === "fotofinish") setCaption("Fotofinish!");
+          clearTimeout(captionTORef.current);
+          captionTORef.current = setTimeout(() => setCaption(null), 1050);
+        }
+      });
+
+      const order = positions.map((_, i) => i).sort((x, y) => positions[y] - positions[x]);
+      setRanks((prev) => {
+        const next = cavalli.map((_, i) => order.indexOf(i) + 1);
+        return prev.some((v, i) => v !== next[i]) ? next : prev;
+      });
+
+      if (progress < 1) rafRef.current = requestAnimationFrame(loop);
+      else setStage("done");
+    };
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [stage]); // eslint-disable-line
+
+  const go = stage === "racing" || stage === "done";
 
   return (
     <div className="relative w-full overflow-hidden border-2" style={{ borderColor: "rgba(255,243,230,.25)" }}>
-      {via && (
-        <div className="pop absolute inset-0 z-20 flex items-center justify-center" style={{ background: "rgba(20,6,32,.35)" }}>
-          <span className="text-6xl uppercase" style={{ ...display, color: C.gold, textShadow: "0 3px 0 rgba(0,0,0,.6)" }}>Via!</span>
+      {(stage === "count" || stage === "via") && (
+        <div className="pop absolute inset-0 z-20 flex items-center justify-center" style={{ background: "rgba(20,6,32,.45)" }}>
+          <span key={stage === "count" ? count : "via"} className="pop text-7xl uppercase" style={{ ...display, color: C.gold, textShadow: "0 3px 0 rgba(0,0,0,.6)" }}>
+            {stage === "count" ? count : "Via!"}
+          </span>
+        </div>
+      )}
+      {caption && (
+        <div className="pop absolute inset-x-0 top-1 z-20 flex justify-center">
+          <span className="px-3 py-1 text-sm font-bold uppercase" style={{ ...display, background: C.gold, color: C.ink }}>{caption}</span>
         </div>
       )}
       {cavalli.map((c, i) => (
@@ -2240,9 +2383,12 @@ function HorseRace({ cavalli, winner, racing }) {
           height: 58, borderTop: i ? "2px solid rgba(0,0,0,.25)" : "none",
           background: `repeating-linear-gradient(90deg, #2c6d3b 0 28px, #275f34 28px 56px)`,
         }}>
-          <div className="z-10 flex w-32 shrink-0 flex-col justify-center px-2 sm:w-44" style={{ background: "rgba(20,6,32,.55)" }}>
-            <span className="truncate text-xs font-bold uppercase sm:text-sm" style={{ ...display, color: C.cream }}>{c.nome}</span>
-            <span className="text-[10px] font-bold opacity-70 sm:text-xs">quota {c.quota}</span>
+          <div className="z-10 flex w-32 shrink-0 items-center gap-2 px-2 sm:w-48" style={{ background: "rgba(20,6,32,.55)" }}>
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center text-xs font-bold" style={{ background: ranks[i] === 1 && go ? C.gold : "rgba(255,243,230,.15)", color: ranks[i] === 1 && go ? C.ink : C.cream }}>{go ? ranks[i] : i + 1}</span>
+            <div className="min-w-0">
+              <span className="block truncate text-xs font-bold uppercase sm:text-sm" style={{ ...display, color: C.cream }}>{c.nome}</span>
+              <span className="text-[10px] font-bold opacity-70 sm:text-xs">quota {c.quota}</span>
+            </div>
           </div>
           <div className="relative h-full flex-1">
             <div aria-hidden className="absolute inset-y-0 z-10" style={{
@@ -2252,15 +2398,70 @@ function HorseRace({ cavalli, winner, racing }) {
             <div aria-hidden className="absolute inset-y-0 right-0 z-10" style={{
               width: 8, backgroundImage: "repeating-conic-gradient(#111 0 25%, #eee 0 50%)", backgroundSize: "8px 8px",
             }} />
-            <span className="gallop absolute top-1/2 z-10 select-none text-4xl leading-none" style={{
-              left: go ? `${targets[i].dist}%` : "2%",
+            <span ref={(el) => { laneRefs.current[i] = el; }} className="gallop absolute top-1/2 z-10 select-none text-4xl leading-none" style={{
+              left: "2%",
               transform: "translateY(-50%) scaleX(-1)",
-              transition: go ? `left ${targets[i].dur}s cubic-bezier(.18,.6,.22,1)` : "none",
               filter: "drop-shadow(0 3px 2px rgba(0,0,0,.4))",
             }}>🏇</span>
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Rivelazione di Roulette Russa: tensione condivisa (le caselle pulsano
+ *  insieme), un attimo di silenzio, poi si aprono una a una — quella storta
+ *  (`slot`, già deciso da resolve()) per ultima e con uno scatto secco.
+ *  Nessuna simulazione di armi reali: solo caselle astratte. */
+function RussaReveal({ slot, accent }) {
+  const [stage, setStage] = useState("tension"); // tension | hush | reveal | done
+  const [opened, setOpened] = useState([]);
+  const orderRef = useRef(null);
+
+  useEffect(() => {
+    setStage("tension"); setOpened([]);
+    const others = [1, 2, 3, 4, 5, 6].filter((n) => n !== slot);
+    const order = [...shuffle(others), slot];
+    orderRef.current = order;
+
+    const timers = [];
+    timers.push(setTimeout(() => { setStage("hush"); sfx.rfPulse(); }, RUSSA_TENSION_MS));
+    const revealStart = RUSSA_TENSION_MS + RUSSA_HUSH_MS;
+    timers.push(setTimeout(() => setStage("reveal"), revealStart));
+    order.forEach((n, i) => {
+      timers.push(setTimeout(() => {
+        setOpened((prev) => [...prev, n]);
+        (n === slot ? sfx.rfGuilty : sfx.wheelTick)();
+      }, revealStart + RUSSA_PRE_FLIP_MS + i * RUSSA_FLIP_GAP_MS));
+    });
+    timers.push(setTimeout(() => setStage("done"), revealStart + RUSSA_PRE_FLIP_MS + order.length * RUSSA_FLIP_GAP_MS + RUSSA_SETTLE_MS));
+    return () => timers.forEach(clearTimeout);
+  }, [slot]);
+
+  return (
+    <div className="grid w-full grid-cols-3 gap-3">
+      {[1, 2, 3, 4, 5, 6].map((n) => {
+        const isOpen = opened.includes(n);
+        const isBad = n === slot;
+        return (
+          <div key={n}
+            className={`flex aspect-square items-center justify-center border-4 text-5xl ${stage === "tension" ? "tick-pulse" : ""} ${isOpen && isBad ? "shake" : ""} ${isOpen ? "pop" : ""}`}
+            style={{
+              ...display,
+              borderColor: isOpen ? (isBad ? C.rosso : C.lime) : accent,
+              background: isOpen ? (isBad ? "rgba(255,59,78,.18)" : "rgba(61,220,132,.12)") : "transparent",
+              color: isOpen ? (isBad ? C.rosso : C.lime) : accent,
+              opacity: stage === "hush" ? 0.3 : 1,
+              transition: "opacity .4s ease, background .3s ease, color .3s ease, border-color .3s ease",
+              animationIterationCount: stage === "tension" ? "infinite" : 1,
+              animationDuration: stage === "tension" ? "1.4s" : undefined,
+              animationDelay: stage === "tension" ? `${n * 0.1}s` : "0s",
+            }}>
+            {isOpen ? (isBad ? "💥" : "✓") : n}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -4212,6 +4413,17 @@ function HostLobby({ room, players, canStart, onStart, err, M, D, T, teamMode, t
 
 function HostGame({ g, left, T, players, answered, outcome, next, room, err, teamMode, teamsList, narrating }) {
   const seenRef = useRef({ key: null, tickAt: null });
+  /** Punti ed esito restano nascosti finché l'animazione (corsa/ruota/caselle)
+   *  non è davvero finita: il risultato è già deciso da resolve(), ma la
+   *  suspense va rispettata anche nella messinscena, non solo nel calcolo. */
+  const [revealed, setRevealed] = useState(false);
+  useEffect(() => {
+    if (g?.phase !== "azzardores") { setRevealed(false); return; }
+    const ms = g.game === "cavalli" ? RACE_REVEAL_MS : g.game === "roulette" ? ROULETTE_REVEAL_MS : RUSSA_REVEAL_MS;
+    setRevealed(false);
+    const t = setTimeout(() => { setRevealed(true); sfx.reveal(); }, ms);
+    return () => clearTimeout(t);
+  }, [g?.phase, g?.rid]); // eslint-disable-line
 
   /* suoni: cambio fase/domanda, ed esito (giusto/sbagliato/azzardo/puzzle) */
   useEffect(() => {
@@ -4220,7 +4432,6 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
     if (seenRef.current.key === key) return;
     seenRef.current.key = key;
     if (["choose", "mgintro", "quiz", "vote", "puzzle", "bet", "azzardo", "spicy", "music"].includes(g.phase)) sfx.whoosh();
-    else if (g.phase === "azzardores") { sfx.drumroll(); setTimeout(() => sfx.reveal(), 550); }
     else if (g.phase === "spicyres") { sfx.drumroll(); setTimeout(() => sfx.reveal(), 500); }
     else if (g.phase === "puzzleres") {
       const anyWin = outcome && Object.values(outcome).some((o) => o?.ok);
@@ -4300,26 +4511,32 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
             </div>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center text-center">
-              {g.game === "cavalli" && <HorseRace cavalli={CAVALLI} winner={g.esito.vincitore} racing={true} />}
-              {g.game === "roulette" && <RouletteWheel numero={g.esito.numero} spinning={true} accent={accent} />}
-              <p className="mt-6 text-sm uppercase tracking-widest opacity-60">{g.game === "cavalli" ? "Ha vinto" : g.game === "roulette" ? "È uscito" : "Era carica"}</p>
-              <p className="pop my-3 text-8xl uppercase glow" style={{ ...display, color: accent }}>{g.esito.label}</p>
-              <p className="text-2xl opacity-80">{g.esito.sub}</p>
-              <div className="mt-6 w-full space-y-2">
-                {players.map((p, i) => (
-                  <div key={p.id} className="rise-in flex items-center gap-3 border-2 px-4 py-3" style={{ borderColor: outcome?.[p.id]?.pts > 0 ? C.lime : "rgba(255,243,230,.15)", animationDelay: `${i * 0.06}s` }}>
-                    <span className="flex-1 text-2xl font-bold" style={{ color: p.color }}>{p.name}</span>
-                    <span className="text-sm opacity-70">{outcome?.[p.id]?.note}</span>
-                    <span className="bump text-2xl font-bold" style={{ color: outcome?.[p.id]?.pts > 0 ? C.lime : C.magenta }}>
-                      {outcome?.[p.id]?.pts > 0 ? `+${outcome[p.id].pts}` : outcome?.[p.id]?.pts}
-                    </span>
+              {g.game === "cavalli" && <HorseRace key={g.rid} cavalli={CAVALLI} winner={g.esito.vincitore} racing={true} />}
+              {g.game === "roulette" && <RouletteWheel key={g.rid} numero={g.esito.numero} spinning={true} accent={accent} />}
+              {g.game === "russa" && <RussaReveal key={g.rid} slot={g.esito.slot} accent={accent} />}
+              {!revealed && <p className="mt-6 text-xl opacity-60">{g.game === "russa" ? "Si apre…" : "Corre ancora…"}</p>}
+              {revealed && (
+                <>
+                  <p className="rise-in mt-6 text-sm uppercase tracking-widest opacity-60">{g.game === "cavalli" ? "Ha vinto" : g.game === "roulette" ? "È uscito" : "Era carica"}</p>
+                  <p className="pop my-3 text-8xl uppercase glow" style={{ ...display, color: accent }}>{g.esito.label}</p>
+                  <p className="rise-in text-2xl opacity-80">{g.esito.sub}</p>
+                  <div className="mt-6 w-full space-y-2">
+                    {players.map((p, i) => (
+                      <div key={p.id} className="rise-in flex items-center gap-3 border-2 px-4 py-3" style={{ borderColor: outcome?.[p.id]?.pts > 0 ? C.lime : "rgba(255,243,230,.15)", animationDelay: `${i * 0.06}s` }}>
+                        <span className="flex-1 text-2xl font-bold" style={{ color: p.color }}>{p.name}</span>
+                        <span className="text-sm opacity-70">{outcome?.[p.id]?.note}</span>
+                        <span className="bump text-2xl font-bold" style={{ color: outcome?.[p.id]?.pts > 0 ? C.lime : C.magenta }}>
+                          {outcome?.[p.id]?.pts > 0 ? `+${outcome[p.id].pts}` : outcome?.[p.id]?.pts}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <p className="mt-6 text-center text-sm opacity-60">{Object.keys(answered).length}/{players.length} pronti per continuare</p>
-              <button onClick={goNext} className="press mt-2 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
-                {g.qn >= g.qtot ? "Verdetto finale" : "Avanti"}
-              </button>
+                  <p className="mt-6 text-center text-sm opacity-60">{Object.keys(answered).length}/{players.length} pronti per continuare</p>
+                  <button onClick={goNext} className="press mt-2 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
+                    {g.qn >= g.qtot ? "Verdetto finale" : "Avanti"}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -5366,6 +5583,7 @@ function Player({ onExit }) {
   const [pendAns, setPendAns] = useState(null);
   const [ready, setReady] = useState(false);
   const [hotPasses, setHotPasses] = useState(0);
+  const [azzRevealed, setAzzRevealed] = useState(false);
   const startRef = useRef(0), ridRef = useRef(""), riskRef = useRef(false);
   riskRef.current = risk;
 
@@ -5376,6 +5594,17 @@ function Player({ onExit }) {
     const t2 = setTimeout(() => setClueStep(2), ((2 * T) / 3) * 1000);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [s?.rid, s?.kind, s?.phase]); // eslint-disable-line
+
+  /* stessa pausa di suspense dello schermo host, prima di far comparire
+   * punti e tasto "Avanti": chi guarda il telefono non deve spoilerarsi
+   * il risultato che sullo schermo grande sta ancora animando. */
+  useEffect(() => {
+    if (s?.phase !== "azzardores") { setAzzRevealed(false); return; }
+    const ms = s.game === "cavalli" ? RACE_REVEAL_MS : s.game === "roulette" ? ROULETTE_REVEAL_MS : RUSSA_REVEAL_MS;
+    setAzzRevealed(false);
+    const t = setTimeout(() => setAzzRevealed(true), ms);
+    return () => clearTimeout(t);
+  }, [s?.phase, s?.rid]); // eslint-disable-line
 
   useEffect(() => {
     if (!joined) return;
@@ -5778,16 +6007,25 @@ function Player({ onExit }) {
 
       {s?.phase === "azzardores" && (
         <div className="tvin flex flex-1 flex-col justify-center text-center">
-          <p className="text-xs uppercase tracking-widest opacity-60">{s.game === "cavalli" ? "Ha vinto" : s.game === "roulette" ? "È uscito" : "Era carica"}</p>
-          <p className="pop glow my-2 text-5xl uppercase" style={{ ...display, color: C.gold }}>{s.esito.label}</p>
-          <div className={`mt-4 px-4 py-5 ${mine?.pts > 0 ? "pop" : "shake"}`} style={{ background: mine?.pts > 0 ? C.lime : C.magenta, color: mine?.pts > 0 ? C.ink : C.cream }}>
-            <p className="text-4xl uppercase" style={display}>{mine?.pts > 0 ? `+${mine.pts}` : mine?.pts ?? 0}</p>
-            <p className="text-sm font-bold">{mine?.note}</p>
-          </div>
-          <button onClick={sendReady} disabled={ready} className="press mt-6 w-full py-4 text-xl uppercase"
-            style={{ ...display, background: ready ? "rgba(255,243,230,.12)" : C.lime, color: ready ? "rgba(255,243,230,.5)" : C.ink }}>
-            {ready ? "Aspettando gli altri…" : "Avanti"}
-          </button>
+          {!azzRevealed ? (
+            <>
+              <p className="text-xl opacity-70">Guarda lo schermo grande…</p>
+              <p className="mt-2 text-6xl">{s.game === "cavalli" ? "🏇" : s.game === "roulette" ? "🎡" : "🎲"}</p>
+            </>
+          ) : (
+            <>
+              <p className="rise-in text-xs uppercase tracking-widest opacity-60">{s.game === "cavalli" ? "Ha vinto" : s.game === "roulette" ? "È uscito" : "Era carica"}</p>
+              <p className="pop glow my-2 text-5xl uppercase" style={{ ...display, color: C.gold }}>{s.esito.label}</p>
+              <div className={`mt-4 px-4 py-5 ${mine?.pts > 0 ? "pop" : "shake"}`} style={{ background: mine?.pts > 0 ? C.lime : C.magenta, color: mine?.pts > 0 ? C.ink : C.cream }}>
+                <p className="text-4xl uppercase" style={display}>{mine?.pts > 0 ? `+${mine.pts}` : mine?.pts ?? 0}</p>
+                <p className="text-sm font-bold">{mine?.note}</p>
+              </div>
+              <button onClick={sendReady} disabled={ready} className="press mt-6 w-full py-4 text-xl uppercase"
+                style={{ ...display, background: ready ? "rgba(255,243,230,.12)" : C.lime, color: ready ? "rgba(255,243,230,.5)" : C.ink }}>
+                {ready ? "Aspettando gli altri…" : "Avanti"}
+              </button>
+            </>
+          )}
         </div>
       )}
 

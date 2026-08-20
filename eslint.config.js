@@ -7,6 +7,7 @@ const globaliBrowser = {
   BroadcastChannel: "readonly", console: "readonly", fetch: "readonly",
   setTimeout: "readonly", clearTimeout: "readonly",
   setInterval: "readonly", clearInterval: "readonly",
+  requestAnimationFrame: "readonly", cancelAnimationFrame: "readonly", performance: "readonly",
   btoa: "readonly", atob: "readonly",
   SpeechSynthesisUtterance: "readonly", speechSynthesis: "readonly",
 };

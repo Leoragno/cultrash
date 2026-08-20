@@ -115,4 +115,14 @@ export const sfx = {
   },
   /** Red Flag: campanello luminoso sul verdetto "assolto". */
   rfInnocent: () => melody([784, 988, 1318], { type: "sine", gain: 0.18, step: 0.08, noteDur: 0.18 }),
+
+  /** Corsa cavalli: segnale di partenza ai blocchi (un accordo che sale, niente sparo). */
+  raceStart: () => melody([392, 523, 659], { type: "square", gain: 0.17, step: 0.05, noteDur: 0.1 }),
+  /** Corsa cavalli: singolo zoccolo, richiamato a cadenza dal game loop. */
+  hoofbeat: () => noise({ duration: 0.05, gain: 0.06, filterFreq: 220, filterType: "lowpass" }),
+  /** Roulette: un singolo "tick" della ruota o rimbalzo della pallina; chi
+   *  chiama decide il ritmo (si dirada avvicinandosi all'arresto). */
+  wheelTick: () => noise({ duration: 0.03, gain: 0.07, filterFreq: 2600, filterType: "highpass" }),
+  /** Roulette: rimbalzo della pallina, più acuto e secco del tick della ruota. */
+  ballBounce: () => tone({ freq: 1500, to: 950, duration: 0.045, type: "triangle", gain: 0.15 }),
 };
