@@ -1,5 +1,6 @@
 import { storage } from "./sync";
 import { pick, shuffle, kState, kPlayer, pPrefix, code, uid, encW, decW, rouColore, scrambleTiles, matchGuess } from "./game/utils";
+import { pickQuestion, pickCategory, createSession } from "./game/questionEngine";
 import { sfx } from "./game/sound";
 import { narrate, stopNarration } from "./game/narrator";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -2580,6 +2581,12 @@ function Host({ onExit }) {
   const cats = Object.keys(enabled).filter((k) => enabled[k]);
 
   const playersRef = useRef(players), gRef = useRef(g), rfRef = useRef(rf), ansRef = useRef({}), usedRef = useRef(loadUsed());
+  /** Stato della partita in corso per il Question Engine: quali domande sono
+   *  già uscite in questa serata (mai due volte, in nessun minigioco) e
+   *  quante per categoria/difficoltà (per non concentrarle). Si azzera a ogni
+   *  nuova partita — la cronologia GLOBALE anti-ripetizione, invece, vive nel
+   *  Question Engine stesso e sopravvive fra una partita e l'altra. */
+  const sessionRef = useRef(createSession());
   const flowRef = useRef([]), betsRef = useRef({}), posRef = useRef({ b: 0, q: 0 }), cfgRef = useRef({ T, cats }), teamsRef = useRef([]);
   const rfFlowRef = useRef([]), rfPosRef = useRef(0), rfLevelRef = useRef(1);
   const nextingRef = useRef(false);
@@ -2840,23 +2847,23 @@ function Host({ onExit }) {
     return () => clearTimeout(t);
   }, [g, left]); // eslint-disable-line
 
+  /** Pesca dalla banca di `cat` tramite il Question Engine: mai due volte
+   *  nella stessa partita, evitata a livello globale se usata di recente in
+   *  QUALSIASI stanza aperta da questo dispositivo (vedi ./game/questionEngine). */
   function draw(cat) {
     const pool = Q[cat];
-    let allowed = pool.map((_, i) => i).filter((i) => cfgRef.current.pool.includes(pool[i].d));
+    let allowedIdx = pool.map((_, i) => i).filter((i) => cfgRef.current.pool.includes(pool[i].d));
     if (cat === "piccante") {
-      // la categoria sale di intensità (s: 1 soft -> 3 esplicito) più la si sceglie nella serata.
-      const askedCount = (usedRef.current[cat] || []).length;
+      // la categoria sale di intensità (s: 1 soft -> 3 esplicito) più la si sceglie in questa partita.
+      const askedCount = sessionRef.current.catCounts.piccante || 0;
       const tier = askedCount < 2 ? 1 : askedCount < 4 ? 2 : 3;
-      const atTier = allowed.filter((i) => (pool[i].s || 1) <= tier);
-      if (atTier.length) allowed = atTier;
+      const atTier = allowedIdx.filter((i) => (pool[i].s || 1) <= tier);
+      if (atTier.length) allowedIdx = atTier;
     }
-    const idxs = allowed.length ? allowed : pool.map((_, i) => i);
-    const seen = usedRef.current[cat] || [];
-    const free = idxs.filter((i) => !seen.includes(i));
-    const list = free.length ? free : idxs;
-    const idx = pick(list);
-    usedRef.current[cat] = free.length ? [...seen, idx] : [idx];
-    const it = pool[idx];
+    const idxs = allowedIdx.length ? allowedIdx : pool.map((_, i) => i);
+    const it = pickQuestion(`q:${cat}`, idxs.map((i) => pool[i]), {
+      keyOf: (x) => x.q, difficultyOf: (x) => x.d, categoryOf: () => cat, session: sessionRef.current,
+    }).item;
     const o = shuffle([0, 1, 2, 3]);
     return { q: it.q, f: it.f, a: o.map((i) => it.a[i]), c: o.indexOf(it.c) };
   }
@@ -2908,7 +2915,9 @@ function Host({ onExit }) {
       chosen = pickManyRotating(bag, "mgSolo", Math.min(M.mgs, bag.length));
     }
     const UNA_SOLA = ["puzzle", "cavalli", "roulette", "russa"];
-    const mgs = chosen.map((m) => ({ kind: "mg", mg: m, n: UNA_SOLA.includes(m) ? 1 : m === "vote" ? Math.min(2, M.qmg) : m === "staffetta" ? Math.max(M.qmg, maxTeamSize(ps)) : M.qmg }));
+    // canzone/sigla hanno banche piccole: non chiedere più round di quante ce ne siano,
+    // altrimenti la stessa partita sarebbe costretta a ripetere una canzone già sentita.
+    const mgs = chosen.map((m) => ({ kind: "mg", mg: m, n: UNA_SOLA.includes(m) ? 1 : m === "vote" ? Math.min(2, M.qmg) : m === "staffetta" ? Math.max(M.qmg, maxTeamSize(ps)) : m === "canzone" ? Math.min(M.qmg, MUSICA.length) : m === "sigla" ? Math.min(M.qmg, SIGLE.length) : M.qmg }));
     return [...own, ...mgs];
   }
 
@@ -2920,19 +2929,15 @@ function Host({ onExit }) {
 
   function startMatch() {
     sfx.start();
+    sessionRef.current = createSession();
     flowRef.current = buildFlow(players);
     setScreen("game");
     runBlock(0);
   }
 
-  /* ---------------- RED FLAG: motore separato, stesso storage ---------------- */
+  /* ---------------- RED FLAG: motore separato, stesso Question Engine ---------------- */
   function pickRf(key, arr, keyf = (x) => x.q ?? x) {
-    const seen = usedRef.current[key] || [];
-    const free = arr.filter((x) => !seen.includes(keyf(x)));
-    const list = free.length ? free : arr;
-    const it = pick(list);
-    usedRef.current[key] = free.length ? [...seen, keyf(it)] : [keyf(it)];
-    return it;
+    return pickQuestion(key, arr, { keyOf: keyf, difficultyOf: (x) => x.lv, session: sessionRef.current }).item;
   }
 
   /** Una Confessione e un Hot Seat a testa (mai lo stesso bersaglio due
@@ -2952,6 +2957,7 @@ function Host({ onExit }) {
 
   function startRedFlag() {
     sfx.start();
+    sessionRef.current = createSession();
     setRfLevel(rfIntensity);
     rfLevelRef.current = rfIntensity;
     rfFlowRef.current = buildRfFlow(players);
@@ -3390,9 +3396,7 @@ function Host({ onExit }) {
     const owner = b.kind === "own" ? playersRef.current.find((p) => p.id === b.pid) : null;
 
     if (b.kind === "own" && b.cat === "piccante") {
-      const seen = usedRef.current.confronti || [];
-      const confronto = pick(CONFRONTI.filter((c) => !seen.includes(c.a))) || pick(CONFRONTI);
-      usedRef.current.confronti = [...seen, confronto.a];
+      const confronto = pickQuestion("confronti", CONFRONTI, { keyOf: (x) => x.a, session: sessionRef.current }).item;
       const state = { phase: "spicy", rid, cat: "piccante", rule: "own", confronto, owner: owner?.id, ownerName: owner?.name, ownerTeam: b.team ?? null, teamName: b.team ? tn(b.team) : null, time: T, qn: doneQ() + 1, qtot: totQ(), blockLabel: b.team ? `Categoria di ${tn(b.team)}` : `Categoria di ${owner?.name}` };
       setG(state);
       setLeft(T);
@@ -3401,8 +3405,7 @@ function Host({ onExit }) {
     }
 
     if (b.kind === "mg" && b.mg === "vote") {
-      const prompt = pick(VOTI.filter((v) => !(usedRef.current.voti || []).includes(v))) || pick(VOTI);
-      usedRef.current.voti = [...(usedRef.current.voti || []), prompt];
+      const prompt = pickQuestion("voti", VOTI, { keyOf: (x) => x, session: sessionRef.current }).item;
       const state = { phase: "vote", rid, mg: "vote", prompt, time: T, qn: doneQ() + 1, qtot: totQ(), blockLabel: MG_ALL.vote.name };
       setG(state);
       setLeft(T);
@@ -3419,9 +3422,7 @@ function Host({ onExit }) {
     }
 
     if (b.kind === "mg" && b.mg === "puzzle") {
-      const seen = usedRef.current.words || [];
-      const item = pick(WORDS.filter((x) => !seen.includes(x.w))) || pick(WORDS);
-      usedRef.current.words = [...seen, item.w];
+      const item = pickQuestion("words", WORDS, { keyOf: (x) => x.w, session: sessionRef.current }).item;
       const letters = {};
       const byT = {};
       playersRef.current.forEach((p) => { if (p.team) (byT[p.team] = byT[p.team] || []).push(p); });
@@ -3439,23 +3440,15 @@ function Host({ onExit }) {
     const rule = b.kind === "own" ? "own" : b.mg;
     let cat = null, q = null, extra = {};
     /** Come draw(): rispetta la difficoltà scelta (se le voci hanno un campo
-     *  `d`) e pesca a rotazione, senza ripetere finché non si esaurisce il mazzo.
-     *  `avoid`, se passato, esclude anche le voci già assegnate nello stesso giro
-     *  (serve a en plein: due giocatori non devono mai vedersi la stessa domanda
-     *  nello stesso round, anche quando il mazzo generale sta per esaurirsi). */
+     *  `d`), evita ripetizioni nella partita corrente e, a livello globale
+     *  (fra partite e stanze diverse), quelle usate di recente — vedi
+     *  ./game/questionEngine. `avoid`, se passato, esclude anche le voci già
+     *  assegnate nello stesso giro (serve a en plein: due giocatori non
+     *  devono mai vedersi la stessa domanda nello stesso round). */
     const once = (key, arr, keyf = (x) => x.q, avoid = null) => {
       const allowed = arr.filter((x) => x.d == null || cfgRef.current.pool.includes(x.d));
       const base = allowed.length ? allowed : arr;
-      const seen = usedRef.current[key] || [];
-      let free = base.filter((x) => !seen.includes(keyf(x)));
-      if (avoid && avoid.size) {
-        const freeAvoiding = free.filter((x) => !avoid.has(keyf(x)));
-        free = freeAvoiding.length ? freeAvoiding : base.filter((x) => !avoid.has(keyf(x)));
-      }
-      const list = free.length ? free : base;
-      const it = pick(list);
-      usedRef.current[key] = free.length ? [...seen, keyf(it)] : [keyf(it)];
-      return it;
+      return pickQuestion(key, base, { keyOf: keyf, difficultyOf: (x) => x.d, session: sessionRef.current, avoid }).item;
     };
 
     if (b.kind === "mg" && (b.mg === "canzone" || b.mg === "sigla")) {
@@ -3523,13 +3516,13 @@ function Host({ onExit }) {
       q = { q: "Ognuno ha la sua domanda sul telefono", a: [], c: -1, f: "Ognuno aveva una definizione diversa: il percorso netto valeva doppio." };
       extra = { per, perC, perF };
     } else if (b.mg === "puntata" || b.mg === "ruota") {
-      cat = pick(cfgRef.current.cats);
+      cat = pickCategory(cfgRef.current.cats, sessionRef.current);
       q = draw(cat);
     } else if (b.mg === "compatti") {
       const it = once("op", OPINIONI);
       q = { q: it.q, a: it.a, c: -1, f: "Nessuna risposta era giusta: contava solo andare d'accordo." };
     } else {
-      cat = pick(cfgRef.current.cats);
+      cat = pickCategory(cfgRef.current.cats, sessionRef.current);
       q = draw(cat);
     }
 
