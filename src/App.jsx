@@ -2166,8 +2166,6 @@ function Presenter({ talking = false, color = C.gold, size = 132 }) {
   );
 }
 
-/** Ruota della roulette vera: 13 spicchi colorati, freccia fissa in alto.
- *  In attesa gira piano; alla rivelazione accelera e si ferma sul numero uscito. */
 /** Ruota + pallina indipendenti: la ruota porta il numero vincente (già
  *  deciso da resolve(), mai dedotto dall'animazione) sotto il puntatore
  *  fisso con un'unica curva di decelerazione; la pallina gira in senso
@@ -2794,6 +2792,12 @@ function Host({ onExit }) {
   /** protegge ask()/resolve() da doppie esecuzioni quando polling e timer scattano
    *  quasi in contemporanea sulla stessa fase (gRef.current non è ancora aggiornato). */
   const advancingRef = useRef(false);
+  /** Timer di sicurezza della narrazione (mgintro/choose): tenerlo qui e
+   *  cancellarlo appena il blocco cambia evita che un timeout rimasto in
+   *  sospeso dal blocco precedente spenga a metà frase l'animazione del
+   *  conduttore del blocco nuovo — era proprio questo a far "sbagliare a
+   *  parlare" il presentatore. */
+  const narrationTORef = useRef(null);
   const tn = (tid) => teamsRef.current.find((t) => t.i === tid)?.name || "Squadra";
   playersRef.current = players; gRef.current = g; rfRef.current = rf; rfLevelRef.current = rfLevel;
   cfgRef.current = { T, cats, pool: D.pool, pmul: D.pmul, diffLabel: D.label, teamMode };
@@ -3516,6 +3520,28 @@ function Host({ onExit }) {
     return () => clearInterval(t);
   }, [screen, room]); // eslint-disable-line
 
+  /** Fa entrare in scena il conduttore per il blocco identificato da `rid`
+   *  (una picked-categoria o un minigioco: cambiano le regole, lui commenta).
+   *  Sia la fine naturale della frase sia il timer di sicurezza confluiscono
+   *  in un solo `finish()`, eseguito una volta sola e solo se il blocco è
+   *  ancora quello giusto: è la stessa guardia in entrambi i punti a evitare
+   *  che un timer rimasto appeso dal blocco precedente spenga a metà frase
+   *  l'animazione del blocco nuovo (il bug per cui "sbagliava a parlare"). */
+  function speakOnStage(text, rid, { maxMs = 15000, onDone } = {}) {
+    clearTimeout(narrationTORef.current);
+    setNarrating(true);
+    let done = false;
+    const finish = () => {
+      if (done || gRef.current?.rid !== rid) return;
+      done = true;
+      clearTimeout(narrationTORef.current);
+      setNarrating(false);
+      onDone?.();
+    };
+    narrate(text, { onEnd: finish });
+    narrationTORef.current = setTimeout(finish, maxMs);
+  }
+
   async function runBlock(i) {
     posRef.current = { b: i, q: 0 };
     const b = flowRef.current[i];
@@ -3531,17 +3557,19 @@ function Host({ onExit }) {
         const cur = gRef.current;
         if (cur?.phase === "choose" && cur.rid === rid) applyPick(pick(cfgRef.current.cats));
       }, 22000);
+      speakOnStage(`Tocca a ${tname || p?.name || "il prossimo"}. Scegli la categoria dal telefono.`, rid, { maxMs: 8000 });
     } else {
-      const state = { phase: "mgintro", mg: b.mg, blockLabel: MG_ALL[b.mg].name, qn: doneQ(), qtot: totQ() };
+      const rid = `mgintro-${i}`;
+      const state = { phase: "mgintro", mg: b.mg, rid, blockLabel: MG_ALL[b.mg].name, qn: doneQ(), qtot: totQ() };
       setG(state);
       await push({ ...state, players: pub(playersRef.current), room });
-      const advance = () => {
-        if (gRef.current?.phase !== "mgintro" || posRef.current.b !== i) return;
-        b.mg === "puntata" ? askBet(i, 0) : ask(i, 0);
-      };
-      setNarrating(true);
-      narrate(MG_ALL[b.mg].rule, { onEnd: () => { setNarrating(false); setTimeout(advance, 900); } });
-      setTimeout(() => { setNarrating(false); advance(); }, 15000);
+      speakOnStage(MG_ALL[b.mg].rule, rid, {
+        maxMs: 15000,
+        onDone: () => setTimeout(() => {
+          if (gRef.current?.rid !== rid || posRef.current.b !== i) return;
+          b.mg === "puntata" ? askBet(i, 0) : ask(i, 0);
+        }, 900),
+      });
     }
   }
 
@@ -4471,7 +4499,8 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <p className="text-sm uppercase tracking-widest opacity-60">Sta scegliendo la sua categoria</p>
           <p className="pop glow my-4 text-7xl uppercase" style={{ ...display, color: players.find((p) => p.id === g.chooser)?.color }}>{g.chooserName}</p>
-          <div className="flex flex-wrap justify-center gap-2">
+          <Presenter talking={narrating} color={players.find((p) => p.id === g.chooser)?.color || C.gold} size={100} />
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
             {g.cats.map((k, i) => <span key={k} className="rise-in border-2 px-4 py-2 text-xl uppercase" style={{ ...display, borderColor: CATS[k].color, color: CATS[k].color, animationDelay: `${i * 0.05}s` }}>{CATS[k].name}</span>)}
           </div>
           <p className="mt-6 text-sm opacity-60">Guarda il telefono. E scegli con giudizio: qui vale doppio.</p>
