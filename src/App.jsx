@@ -1913,7 +1913,7 @@ const RF_SCELTA = [
   { lv: 1, q: "Meglio...", a: "Innamorarsi troppo in fretta", b: "Non innamorarsi mai abbastanza" },
   { lv: 3, q: "Chi è più da tenere d'occhio?", a: "Chi parla sempre bene di tutti", b: "Chi non parla mai di nessuno" },
   { lv: 4, q: "Se doveste rompere stasera, meglio...", a: "Farlo davanti a tutto il gruppo", b: "Sparire e farlo scoprire dagli altri" },
-  { lv: 4, q: "Chi di voi due merita di più un red flag ufficiale?", a: "Chi ha alla sua sinistra", b: "Chi ha alla sua destra" },
+  { lv: 4, q: "Meglio essere ricordati come...", a: "Il red flag di qualcuno", b: "Il rimpianto di nessuno" },
   { lv: 4, q: "Meglio...", a: "Un segreto del gruppo detto a un estraneo", b: "Un segreto tuo detto al gruppo sbagliato" },
   { lv: 4, q: "Cosa è più imperdonabile?", a: "Mentire per convenienza", b: "Dire una verità solo per ferire" },
 ];
@@ -1963,6 +1963,26 @@ const RF_VOTE = [
   { lv: 4, q: "Chi di voi tradirebbe la fiducia del gruppo per una storia che finirà comunque male?" },
 ];
 
+/** Hot Seat: domanda d'apertura per lanciare l'interrogatorio dal vivo —
+ *  dopo non serve altro, il gruppo continua a voce mentre il bersaglio
+ *  risponde o passa dal telefono. */
+const RF_HOTSEAT = [
+  { lv: 1, q: "Da quanto tempo nascondi qualcosa a queste persone?" },
+  { lv: 1, q: "Qual è la domanda che speravi nessuno ti facesse stasera?" },
+  { lv: 1, q: "Cosa diresti di te se dovessi essere davvero onesto/a per un minuto?" },
+  { lv: 2, q: "Chi in questo gruppo ti conosce meno di quanto crede?" },
+  { lv: 2, q: "Qual è l'ultima bugia che hai detto a qualcuno seduto qui?" },
+  { lv: 2, q: "Cosa faresti se scoprissi che tutti sanno già il tuo segreto?" },
+  { lv: 2, q: "Qual è la cosa più imbarazzante che hai fatto per una crush?" },
+  { lv: 3, q: "Cosa hai fatto di recente di cui non vai fiero/a?" },
+  { lv: 3, q: "Chi di questo gruppo tradiresti per non fare una brutta figura?" },
+  { lv: 3, q: "Qual è il segreto che porti avanti da più tempo?" },
+  { lv: 3, q: "Cosa hai detto alle spalle di qualcuno qui presente?" },
+  { lv: 4, q: "Qual è la cosa più red flag che hai fatto in una relazione?" },
+  { lv: 4, q: "Chi in questo gruppo ha già pagato per un tuo errore senza saperlo?" },
+  { lv: 4, q: "Cosa nascondi che, se uscisse ora, cambierebbe la serata?" },
+];
+
 /** Carte «Caos»: pescate a caso, votano tutti, il tema cambia ogni volta. */
 const RF_CAOS = [
   { lv: 1, q: "Chi di voi rovinerebbe una sorpresa solo perché non resiste a stare zitto/a?" },
@@ -1981,20 +2001,20 @@ const RF_CAOS = [
  *  verità o inventare. Il gruppo poi vota se ci ha creduto o no. */
 const RF_BLUFF = [
   { lv: 1, q: "Qual è la bugia più assurda che hai raccontato per uscire da un impegno?" },
-  { lv: 1, q: "Qual è la scusa più creativa che useresti per arrivare tardi a un appuntamento?" },
+  { lv: 1, q: "Qual è la scusa più assurda che hai usato per arrivare tardi a un appuntamento?" },
   { lv: 1, q: "Qual è il complimento più esagerato che hai mai fatto per fare colpo su qualcuno?" },
-  { lv: 2, q: "Qual è la cosa più strana che diresti per fare colpo al primo appuntamento?" },
-  { lv: 2, q: "Qual è la bugia bianca che diresti per evitare una lite di coppia?" },
-  { lv: 2, q: "Qual è il messaggio più imbarazzante che potresti aver mandato a una crush?" },
-  { lv: 2, q: "Qual è il motivo più assurdo per cui potresti aver ignorato un messaggio?" },
-  { lv: 2, q: "Qual è la scusa che daresti se ti beccassero a guardare il profilo di un ex?" },
-  { lv: 3, q: "Qual è la bugia più grossa che diresti per coprire un amico in una serata andata male?" },
-  { lv: 3, q: "Qual è la scusa che useresti per giustificare uno stalking sui social?" },
-  { lv: 3, q: "Qual è la bugia che diresti per non ammettere di avere ancora sentimenti per un ex?" },
-  { lv: 3, q: "Qual è la versione dei fatti che daresti per non ammettere una gelosia?" },
-  { lv: 4, q: "Qual è la bugia più cattiva che diresti per proteggere solo te stesso/a?" },
-  { lv: 4, q: "Qual è il segreto più grosso che negheresti fino alla morte?" },
-  { lv: 4, q: "Qual è la bugia che diresti in faccia a un amico se ti convenisse davvero?" },
+  { lv: 2, q: "Qual è la cosa più strana che hai detto per fare colpo al primo appuntamento?" },
+  { lv: 2, q: "Qual è la bugia bianca che hai detto per evitare una lite di coppia?" },
+  { lv: 2, q: "Qual è il messaggio più imbarazzante che hai mandato a una crush?" },
+  { lv: 2, q: "Qual è il motivo più assurdo che hai inventato per aver ignorato un messaggio?" },
+  { lv: 2, q: "Qual è la scusa che hai dato quando ti hanno beccato a guardare il profilo di un ex?" },
+  { lv: 3, q: "Qual è la bugia più grossa che hai detto per coprire un amico in una serata andata male?" },
+  { lv: 3, q: "Qual è la scusa che hai dato quando ti hanno beccato a stalkerare qualcuno sui social?" },
+  { lv: 3, q: "Qual è la bugia che hai detto per non ammettere di avere ancora sentimenti per un ex?" },
+  { lv: 3, q: "Qual è la versione dei fatti che hai dato per nascondere una tua gelosia?" },
+  { lv: 4, q: "Qual è la bugia più cattiva che hai detto per proteggere solo te stesso/a?" },
+  { lv: 4, q: "Qual è il segreto più grosso che hai sempre negato?" },
+  { lv: 4, q: "Qual è la bugia più grossa che hai detto in faccia a un amico?" },
 ];
 
 /** «Crush»: stesso schema di «Chi è la Red Flag» — voto segreto — ma sul
@@ -2023,7 +2043,7 @@ const RF_TITLES = [
   { key: "green", emoji: "👑", label: "Green Flag", pick: (st) => [...st].sort((a, b) => a.flags - b.flags)[0] },
   { key: "heartbreaker", emoji: "😏", label: "Heartbreaker", pick: (st) => [...st].sort((a, b) => b.votedFor - a.votedFor)[0] },
   { key: "suprema", emoji: "🚩", label: "Red Flag Suprema", pick: (st) => [...st].sort((a, b) => b.flags - a.flags)[0] },
-  { key: "bugiardo", emoji: "🎭", label: "BugiarDO", pick: (st) => [...st].sort((a, b) => (b.passiConf + b.passiHot) - (a.passiConf + a.passiHot))[0] },
+  { key: "bugiardo", emoji: "🎭", label: "Bugiardo/a", pick: (st) => [...st].sort((a, b) => b.bluffBeccato - a.bluffBeccato)[0] },
   { key: "nonconfessa", emoji: "🫣", label: "Non confessa mai", pick: (st) => [...st].sort((a, b) => b.passiConf - a.passiConf)[0] },
   { key: "peggiore", emoji: "😂", label: "Peggior decisione", pick: (st) => [...st].sort((a, b) => b.sceltaMancate - a.sceltaMancate)[0] },
 ];
@@ -3191,7 +3211,8 @@ function Host({ onExit }) {
       state = { mode: "redflag", phase: "rf-confessione", rid, target: item.pid, targetName: target?.name, card, time: RF_CONF_T, qn, qtot, level: lv };
     } else if (item.kind === "hotseat") {
       const target = playersRef.current.find((p) => p.id === item.pid);
-      state = { mode: "redflag", phase: "rf-hotseat", rid, target: item.pid, targetName: target?.name, time: RF_HOTSEAT_T, livePasses: 0, qn, qtot, level: lv };
+      const card = pickRf("rfHotseat", RF_HOTSEAT.filter((x) => x.lv <= lv), (x) => x.q);
+      state = { mode: "redflag", phase: "rf-hotseat", rid, target: item.pid, targetName: target?.name, card, time: RF_HOTSEAT_T, livePasses: 0, qn, qtot, level: lv };
     } else if (item.kind === "bluff") {
       const target = playersRef.current.find((p) => p.id === item.pid);
       const card = pickRf("rfBluff", RF_BLUFF.filter((x) => x.lv <= lv), (x) => x.q);
@@ -3205,6 +3226,14 @@ function Host({ onExit }) {
     setRf(state);
     setLeft(state.time);
     await push({ ...state, players: pub(playersRef.current), room });
+    const rfNarration = item.kind === "scelta" ? "Scelta di gruppo. Rispondete tutti dal telefono: chi non sceglie in tempo prende una bandiera."
+      : item.kind === "confessione" ? `Confessionale per ${state.targetName}. Rispondi a voce o passa dal telefono.`
+      : item.kind === "hotseat" ? `Hot Seat per ${state.targetName}. Il gruppo lo mette sotto torchio a voce.`
+      : item.kind === "bluff" ? `Bluff per ${state.targetName}. Sceglie in segreto se dire la verità o inventare, poi la scrive sul telefono.`
+      : item.variant === "caos" ? "Caos. Votate in segreto chi si merita questa carta."
+      : item.variant === "crush" ? "Crush. Votate in segreto."
+      : "Chi è la Red Flag? Votate in segreto.";
+    speakOnStage(rfNarration, rid, { maxMs: 7000, stateRef: rfRef });
   }
 
   async function resolveRf() {
@@ -3297,13 +3326,20 @@ function Host({ onExit }) {
         const caught = cur.bluffChoice === "bluff" && majority === "bluff";
         const gain = caught ? 1 : 0;
         const updated = ps.map((p) => (p.id === cur.target ? {
-          ...p, flags: (p.flags || 0) + gain,
+          ...p, flags: (p.flags || 0) + gain, bluffBeccato: (p.bluffBeccato || 0) + (caught ? 1 : 0),
           lastBluff: { q: cur.card.q, choice: cur.bluffChoice, caught },
         } : p));
-        res[cur.target] = { flag: gain, note: caught ? "Beccato/a: bandiera." : cur.bluffChoice === "bluff" ? "Bluff riuscito, nessuna bandiera." : "Creduto/a: nessuna bandiera." };
+        // Il "creduto/a" vale solo se la verità è stata anche riconosciuta come tale:
+        // se il gruppo ha votato "bluff" pur essendo vero, non è stato creduto — dirlo
+        // altrimenti è un messaggio che contraddice il voto appena mostrato in tabella.
+        const note = caught ? "Beccato/a: bandiera."
+          : cur.bluffChoice === "bluff" ? "Bluff riuscito, nessuna bandiera."
+          : majority === "bluff" ? "Era la verità, ma non ci hanno creduto: nessuna bandiera comunque."
+          : "Creduto/a: nessuna bandiera.";
+        res[cur.target] = { flag: gain, note };
         setPlayers(updated);
         setRf({ ...cur, phase: "rf-bluffres", tally, majority });
-        await push({ mode: "redflag", phase: "rf-bluffres", rid: cur.rid, target: cur.target, targetName: cur.targetName, card: cur.card, bluffChoice: cur.bluffChoice, tally, majority, res, qn: cur.qn, qtot: cur.qtot, players: pub(updated), room });
+        await push({ mode: "redflag", phase: "rf-bluffres", rid: cur.rid, target: cur.target, targetName: cur.targetName, card: cur.card, bluffChoice: cur.bluffChoice, bluffText: cur.bluffText, tally, majority, res, qn: cur.qn, qtot: cur.qtot, players: pub(updated), room });
         ansRef.current = {}; setAnswered({});
         return;
       }
@@ -3330,11 +3366,12 @@ function Host({ onExit }) {
     nextingRef.current = true;
     const cur = rfRef.current;
     const bluffChoice = ansRef.current[cur.target]?.choice ?? "verita";
-    const state = { ...cur, phase: "rf-bluffvote", bluffChoice };
+    const bluffText = ansRef.current[cur.target]?.text ?? cur.bluffText ?? "(nessuna risposta)";
+    const state = { ...cur, phase: "rf-bluffvote", bluffChoice, bluffText };
     setRf(state);
     setLeft(RF_BLUFFVOTE_T);
     ansRef.current = {}; setAnswered({});
-    const p = push({ mode: "redflag", phase: "rf-bluffvote", rid: cur.rid, target: cur.target, targetName: cur.targetName, card: cur.card, time: RF_BLUFFVOTE_T, qn: cur.qn, qtot: cur.qtot, players: pub(playersRef.current), room });
+    const p = push({ mode: "redflag", phase: "rf-bluffvote", rid: cur.rid, target: cur.target, targetName: cur.targetName, card: cur.card, bluffText, time: RF_BLUFFVOTE_T, qn: cur.qn, qtot: cur.qtot, players: pub(playersRef.current), room });
     Promise.resolve(p).finally(() => { nextingRef.current = false; });
   }
 
@@ -3354,7 +3391,7 @@ function Host({ onExit }) {
   async function endRedFlag() {
     const ps = playersRef.current;
     const rank = [...ps].sort((a, b) => (a.flags || 0) - (b.flags || 0));
-    const statFor = (p) => ({ id: p.id, flags: p.flags || 0, votedFor: p.votedFor || 0, passiConf: p.passiConf || 0, passiHot: p.passiHot || 0, sceltaMancate: p.sceltaMancate || 0 });
+    const statFor = (p) => ({ id: p.id, flags: p.flags || 0, votedFor: p.votedFor || 0, passiConf: p.passiConf || 0, passiHot: p.passiHot || 0, sceltaMancate: p.sceltaMancate || 0, bluffBeccato: p.bluffBeccato || 0 });
     const stats = ps.map(statFor);
     const titles = RF_TITLES.map((t) => {
       const w = t.pick(stats);
@@ -3462,6 +3499,20 @@ function Host({ onExit }) {
             setRf((x) => (x?.rid === cur.rid ? { ...x, livePasses: d.hotPass } : x));
           }
         } catch (_) {}
+        const askers = playersRef.current.filter((p) => p.id !== cur.target);
+        const docs = await Promise.all(askers.map(async (p) => {
+          try {
+            const r = await storage.get(kPlayer(room, p.id), true);
+            const d = JSON.parse(r.value);
+            return d.rid === cur.rid && d.rfHotseatQ ? { name: p.name, q: d.rfHotseatQ, ts: d.rfHotseatQts || 0 } : null;
+          } catch (_) { return null; }
+        }));
+        const best = docs.filter(Boolean).sort((a, b) => b.ts - a.ts)[0];
+        if (best && best.ts > (cur.customQTs || 0)) {
+          const updated = { ...cur, customQ: best.q, customQBy: best.name, customQTs: best.ts };
+          setRf(updated);
+          await push({ ...updated, players: pub(playersRef.current), room });
+        }
         return;
       }
 
@@ -3487,9 +3538,12 @@ function Host({ onExit }) {
           try {
             const r = await storage.get(kPlayer(room, cur.target), true);
             const d = JSON.parse(r.value);
-            if (d.rid === cur.rid && (d.rfBluff === "verita" || d.rfBluff === "bluff")) {
-              ansRef.current[cur.target] = { choice: d.rfBluff };
+            if (d.rid === cur.rid && (d.rfBluff === "verita" || d.rfBluff === "bluff") && d.rfBluffText) {
+              ansRef.current[cur.target] = { choice: d.rfBluff, text: d.rfBluffText };
               setAnswered({ [cur.target]: true });
+              const updated = { ...cur, bluffText: d.rfBluffText };
+              setRf(updated);
+              await push({ ...updated, players: pub(playersRef.current), room });
             }
           } catch (_) {}
         }
@@ -3527,12 +3581,12 @@ function Host({ onExit }) {
    *  ancora quello giusto: è la stessa guardia in entrambi i punti a evitare
    *  che un timer rimasto appeso dal blocco precedente spenga a metà frase
    *  l'animazione del blocco nuovo (il bug per cui "sbagliava a parlare"). */
-  function speakOnStage(text, rid, { maxMs = 15000, onDone } = {}) {
+  function speakOnStage(text, rid, { maxMs = 15000, onDone, stateRef = gRef } = {}) {
     clearTimeout(narrationTORef.current);
     setNarrating(true);
     let done = false;
     const finish = () => {
-      if (done || gRef.current?.rid !== rid) return;
+      if (done || stateRef.current?.rid !== rid) return;
       done = true;
       clearTimeout(narrationTORef.current);
       setNarrating(false);
@@ -4149,7 +4203,7 @@ function Host({ onExit }) {
     return <HostLobby {...{ room, players, err, M, D, T, teamMode, teamsList, partyType }} canStart={lobbyReady} onStart={partyType === "redflag" ? startRedFlag : startMatch} />;
 
   if (screen === "rf-game")
-    return <HostRedFlag {...{ rf, left, players, answered, next: nextRf, room, err, rfLevel }} onRaiseLevel={raiseRfLevel} onExit={onExit} onAgain={() => {
+    return <HostRedFlag {...{ rf, left, players, answered, next: nextRf, room, err, rfLevel, narrating }} onRaiseLevel={raiseRfLevel} onExit={onExit} onAgain={() => {
       const reset = players.map((p) => ({ ...p, flags: 0, passiConf: 0, passiHot: 0, votedFor: 0, sceltaMancate: 0, lastConfessione: null, lastHotseat: null, votedAgainst: null }));
       setPlayers(reset);
       playersRef.current = reset;
@@ -5038,7 +5092,7 @@ function RfLevelTacche({ level, onRaise }) {
   );
 }
 
-function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, onRaiseLevel, onAgain, onExit }) {
+function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, narrating, onRaiseLevel, onAgain, onExit }) {
   const seenRef = useRef({ key: null, tickAt: null });
   useEffect(() => {
     if (!rf) return;
@@ -5091,6 +5145,7 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
       {rf.phase === "rf-scelta" && (
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <span className="-rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: C.gold, color: C.ink }}>Scelta</span>
+          <Presenter talking={narrating} color={C.gold} size={80} />
           <p className="my-5 max-w-3xl text-4xl uppercase" style={{ ...display, color: C.cream }}>{rf.card.q}</p>
           <div className="mt-2 grid w-full gap-4 sm:grid-cols-2">
             <div className="slide-l border-2 p-6 text-left" style={{ borderColor: C.cream }}>
@@ -5139,8 +5194,10 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
       {rf.phase === "rf-confessione" && (
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <span className="pop -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: C.flagRed, color: C.cream }}>Confessionale</span>
-          <p className="pop glow my-4 text-7xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
-          <p className="max-w-xl text-lg opacity-70">Sta rispondendo dal suo telefono. Rispondere o passare: chi passa si prende una bandiera.</p>
+          <p className="pop glow my-4 text-6xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
+          <Presenter talking={narrating} color={C.flagRed} size={80} />
+          <p className="mt-4 max-w-2xl text-2xl font-bold" style={display}>{rf.card?.q}</p>
+          <p className="mt-4 max-w-xl text-lg opacity-70">Sta rispondendo dal suo telefono. Rispondere o passare: chi passa si prende una bandiera.</p>
         </div>
       )}
 
@@ -5148,6 +5205,7 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <p className="text-xs uppercase tracking-widest opacity-60">Confessionale</p>
           <p className="text-4xl uppercase" style={{ ...display, color: C.cream }}>{rf.targetName}</p>
+          <p className="mt-2 max-w-xl text-sm opacity-60">{rf.card?.q}</p>
           <div className={`stamp-in mt-6 inline-block -rotate-1 border-4 px-10 py-5 ${rf.passed ? "" : ""}`} style={{ borderColor: rf.passed ? C.flagRed : C.lime, color: rf.passed ? C.flagRed : C.lime }}>
             <p className="text-5xl uppercase" style={display}>{rf.passed ? "Passo · 🚩" : "Confessato"}</p>
           </div>
@@ -5163,6 +5221,7 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
           <span className="-rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: rf.variant === "caos" ? C.arancio : rf.variant === "crush" ? C.magenta : C.flagRed, color: rf.variant === "caos" ? C.ink : C.cream }}>
             {rf.variant === "caos" ? "Caos" : rf.variant === "crush" ? "Crush" : "Chi è la Red Flag"}
           </span>
+          <Presenter talking={narrating} color={rf.variant === "caos" ? C.arancio : rf.variant === "crush" ? C.magenta : C.flagRed} size={80} />
           <div className="mt-4 w-full max-w-2xl border-4 border-dashed p-8" style={{ borderColor: "rgba(255,31,61,.4)" }}>
             <p className="text-sm font-bold uppercase" style={{ color: C.flagRed }}>🫣 Voti chiusi</p>
             <p className="mt-3 text-3xl uppercase" style={{ ...display, color: C.cream }}>{rf.card.q}</p>
@@ -5200,8 +5259,11 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
       {rf.phase === "rf-hotseat" && (
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <span className={`pop -rotate-1 px-3 py-1 text-xs font-bold uppercase ${lowTime ? "buzzer-hot" : ""}`} style={{ background: C.flagRed, color: C.cream }}>Hot Seat</span>
-          <p className="pop glow my-4 text-8xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
-          <p className="max-w-xl text-xl font-bold opacity-80">Il gruppo fa domande a voce. 3 pass gratis, poi ogni pass è una bandiera.</p>
+          <p className="pop glow my-4 text-7xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
+          <Presenter talking={narrating} color={C.flagRed} size={80} />
+          <p className="mt-4 max-w-2xl text-2xl font-bold" style={display}>{rf.customQ || rf.card?.q}</p>
+          {rf.customQ && <p className="mt-1 text-xs opacity-60">Domanda di {rf.customQBy}</p>}
+          <p className="mt-4 max-w-xl text-lg opacity-70">Il gruppo fa domande a voce partendo da qui — o scrivetene una dal telefono. 3 pass gratis, poi ogni pass è una bandiera.</p>
           <p className="mt-6 text-3xl font-bold" style={{ color: (rf.livePasses || 0) > 3 ? C.flagRed : C.cream }}>
             Pass: {rf.livePasses || 0}{(rf.livePasses || 0) > 3 ? ` (+${(rf.livePasses || 0) - 3} 🚩)` : " / 3 gratis"}
           </p>
@@ -5234,8 +5296,14 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
       {rf.phase === "rf-bluff" && (
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <span className={`pop -rotate-1 px-3 py-1 text-xs font-bold uppercase ${lowTime ? "buzzer-hot" : ""}`} style={{ background: C.flagRed, color: C.cream }}>🎭 Bluff</span>
-          <p className="pop glow my-4 text-7xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
-          <p className="max-w-xl text-lg opacity-70">Sta decidendo in segreto se dire la verità o bluffare, poi lo dice a voce. Il gruppo vota subito dopo.</p>
+          <p className="pop glow my-4 text-6xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
+          <Presenter talking={narrating} color={C.flagRed} size={80} />
+          <p className="mt-4 max-w-2xl text-2xl font-bold" style={display}>{rf.card?.q}</p>
+          {rf.bluffText ? (
+            <p className="stamp-in mt-6 max-w-2xl border-4 px-6 py-4 text-3xl font-bold" style={{ borderColor: C.flagRed, color: C.cream }}>“{rf.bluffText}”</p>
+          ) : (
+            <p className="mt-4 max-w-xl text-lg opacity-70">Sta scrivendo la sua risposta in segreto...</p>
+          )}
         </div>
       )}
 
@@ -5243,7 +5311,8 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <p className="text-xs uppercase tracking-widest opacity-60">Verità o bluff?</p>
           <p className="pop glow text-6xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
-          <p className="mt-2 max-w-xl text-sm opacity-70">{rf.card?.q}</p>
+          <p className="mt-2 max-w-xl text-sm opacity-60">{rf.card?.q}</p>
+          <p className="mt-3 max-w-2xl border-4 px-6 py-4 text-2xl font-bold" style={{ borderColor: C.flagRed, color: C.cream }}>“{rf.bluffText}”</p>
           <p className="mt-6 text-sm opacity-60">{Object.keys(answered).length}/{voters} hanno votato</p>
         </div>
       )}
@@ -5251,13 +5320,17 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, on
       {rf.phase === "rf-bluffres" && (
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
           <p className="text-4xl uppercase" style={{ ...display, color: C.cream }}>{rf.targetName}</p>
-          <p className="mt-2 max-w-xl text-sm opacity-70">{rf.card?.q}</p>
+          <p className="mt-2 max-w-xl text-sm opacity-60">{rf.card?.q}</p>
+          <p className="mt-2 max-w-2xl text-xl font-bold opacity-90">“{rf.bluffText}”</p>
           <div className={`stamp-in mt-6 inline-block -rotate-1 border-4 px-10 py-5 ${rf.bluffChoice === "bluff" && rf.majority === "bluff" ? "shake" : ""}`} style={{ borderColor: rf.bluffChoice === "bluff" ? C.flagRed : C.lime, color: rf.bluffChoice === "bluff" ? C.flagRed : C.lime }}>
             <p className="text-5xl uppercase" style={display}>{rf.bluffChoice === "bluff" ? "Era un bluff" : "Era vero"}</p>
           </div>
           <p className="mt-3 text-sm font-bold opacity-70">Il gruppo ha detto: {rf.majority === "bluff" ? "bluff" : "verità"} · {rf.tally.bluff} contro {rf.tally.verita}</p>
           <p className="mt-1 text-sm font-bold" style={{ color: rf.bluffChoice === "bluff" && rf.majority === "bluff" ? C.flagRed : C.lime }}>
-            {rf.bluffChoice === "bluff" && rf.majority === "bluff" ? "🚩 Beccato/a" : rf.bluffChoice === "bluff" ? "Bluff riuscito" : "Creduto/a"}
+            {rf.bluffChoice === "bluff" && rf.majority === "bluff" ? "🚩 Beccato/a"
+              : rf.bluffChoice === "bluff" ? "Bluff riuscito"
+              : rf.majority === "bluff" ? "Verità non creduta, ma va bene così"
+              : "Creduto/a"}
           </p>
           <p className="mt-6 text-center text-sm opacity-60">{Object.keys(answered).length}/{voters} pronti per continuare</p>
           <button onClick={goNext} className="press mt-2 w-full max-w-2xl py-5 text-3xl uppercase" style={{ ...display, background: C.flagRed, color: C.cream, boxShadow: `6px 6px 0 ${C.ink2}` }}>
@@ -5613,6 +5686,9 @@ function Player({ onExit }) {
   const [ready, setReady] = useState(false);
   const [hotPasses, setHotPasses] = useState(0);
   const [azzRevealed, setAzzRevealed] = useState(false);
+  const [bluffText, setBluffText] = useState("");
+  const [bluffSent, setBluffSent] = useState(false);
+  const [hotQ, setHotQ] = useState("");
   const startRef = useRef(0), ridRef = useRef(""), riskRef = useRef(false);
   riskRef.current = risk;
 
@@ -5648,7 +5724,7 @@ function Player({ onExit }) {
         if ((st.phase === "quiz" || st.phase === "vote" || st.phase === "choose" || st.phase === "spicy" || st.phase === "bet" || st.phase === "rf-scelta" || st.phase === "rf-confessione" || st.phase === "rf-vote" || st.phase === "rf-hotseat" || st.phase === "rf-hotseatvote" || st.phase === "rf-bluff" || st.phase === "rf-bluffvote") && st.rid !== ridRef.current) {
           ridRef.current = st.rid;
           startRef.current = Date.now();
-          setAnswer(null); setRisk(false); setNumGuess(""); setClueStep(0); setPendAns(null); setReady(false); setHotPasses(0);
+          setAnswer(null); setRisk(false); setNumGuess(""); setClueStep(0); setPendAns(null); setReady(false); setHotPasses(0); setBluffText(""); setBluffSent(false); setHotQ("");
           if (st.phase !== "choose") { setBar(100); setTimeout(() => !stop && setBar(0), 60); }
         }
       } catch (_) { setMsg("Sto ricollegando..."); }
@@ -5743,17 +5819,24 @@ function Player({ onExit }) {
     setHotPasses(n);
     await write({ rid: s.rid, hotPass: n });
   }
+  async function sendHotQ() {
+    if (s?.phase !== "rf-hotseat" || !hotQ.trim()) return;
+    const t = hotQ.trim();
+    setHotQ("");
+    await write({ rid: s.rid, rfHotseatQ: t, rfHotseatQts: Date.now() });
+  }
   async function sendRfJudge(v) {
     if (answer !== null || s?.phase !== "rf-hotseatvote") return;
     setAnswer(v);
     const ok = await write({ rid: s.rid, rfJudge: v });
     if (!ok) setAnswer(null);
   }
-  async function sendRfBluff(choice) {
-    if (answer !== null || s?.phase !== "rf-bluff") return;
-    setAnswer(choice);
-    const ok = await write({ rid: s.rid, rfBluff: choice });
-    if (!ok) setAnswer(null);
+  async function sendRfBluff(choice, text) {
+    if (bluffSent || s?.phase !== "rf-bluff") return;
+    const t = text.trim();
+    if (!t) return;
+    const ok = await write({ rid: s.rid, rfBluff: choice, rfBluffText: t });
+    if (ok) setBluffSent(true);
   }
   async function sendRfBluffGuess(choice) {
     if (answer !== null || s?.phase !== "rf-bluffvote") return;
@@ -6330,7 +6413,9 @@ function Player({ onExit }) {
         s.target === id ? (
           <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
             <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: C.flagRed, color: C.cream }}>Sei tu, Hot Seat</span>
-            <p className="mb-6 max-w-xs text-sm opacity-70">Il gruppo ti fa domande a voce. Rispondi, o passa. Dal quarto pass in poi, ogni pass è una bandiera.</p>
+            <p className="mb-1 max-w-xs text-base font-bold">{s.customQ || s.card?.q}</p>
+            {s.customQ && <p className="mb-3 text-xs opacity-60">Domanda di {s.customQBy}</p>}
+            <p className="mb-6 max-w-xs text-sm opacity-70">Il gruppo ti fa domande a voce partendo da qui. Rispondi, o passa. Dal quarto pass in poi, ogni pass è una bandiera.</p>
             <button onClick={sendHotPass} className="press w-full max-w-xs py-8 text-3xl uppercase"
               style={{ ...display, background: hotPasses >= 3 ? C.flagRed : C.gold, color: C.ink }}>
               Passo ({hotPasses})
@@ -6341,7 +6426,16 @@ function Player({ onExit }) {
           <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
             <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: "rgba(255,31,61,.15)", color: C.flagRed }}>Hot Seat</span>
             <p className="text-2xl font-bold" style={{ color: C.flagRed }}>{s.targetName}</p>
-            <p className="mt-2 max-w-xs text-sm opacity-70">È sotto torchio. Fagli domande a voce, guarda il countdown sullo schermo grande.</p>
+            <p className="mt-2 max-w-xs text-sm opacity-70">È sotto torchio. Guarda lo schermo grande per la domanda d'apertura, poi continuate a voce.</p>
+            <div className="mt-6 w-full max-w-xs">
+              <p className="mb-2 text-xs opacity-60">Hai una domanda migliore da fargli/le? Scrivila, la vedranno tutti:</p>
+              <input value={hotQ} onChange={(e) => setHotQ(e.target.value.slice(0, 140))} placeholder="La tua domanda..."
+                className="w-full border-2 p-3 text-sm" style={{ background: C.cream, color: C.ink, borderColor: C.ink }} />
+              <button onClick={sendHotQ} disabled={!hotQ.trim()} className="press mt-2 w-full py-3 text-sm uppercase"
+                style={{ background: hotQ.trim() ? C.flagRed : "rgba(255,243,230,.12)", color: hotQ.trim() ? C.cream : "rgba(255,243,230,.5)" }}>
+                Invia
+              </button>
+            </div>
           </div>
         )
       )}
@@ -6393,26 +6487,44 @@ function Player({ onExit }) {
           <div className="tvin flex flex-1 flex-col">
             <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: C.flagRed, color: C.cream }}>🎭 Bluff</span>
             <p className="mb-4 text-lg font-bold leading-snug">{s.card?.q}</p>
-            <p className="mb-4 text-xs opacity-60">Scegli in segreto, poi rispondi a voce di conseguenza.</p>
-            <div className="flex flex-1 flex-col gap-3">
-              <button onClick={() => sendRfBluff("verita")} disabled={answer !== null}
-                className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${answer === "verita" ? "bump" : ""}`}
-                style={{ background: answer === "verita" ? C.cream : C.lime, color: C.ink, opacity: answer !== null && answer !== "verita" ? 0.25 : 1, boxShadow: answer !== null ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
-                Dico la verità
-              </button>
-              <button onClick={() => sendRfBluff("bluff")} disabled={answer !== null}
-                className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${answer === "bluff" ? "bump" : ""}`}
-                style={{ background: answer === "bluff" ? C.cream : C.flagRed, color: C.cream, opacity: answer !== null && answer !== "bluff" ? 0.25 : 1, boxShadow: answer !== null ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
-                Bluffo
-              </button>
-            </div>
-            {answer && <p className="mt-2 text-center text-sm opacity-70">Deciso. Ora dillo al gruppo.</p>}
+            {answer === null ? (
+              <>
+                <p className="mb-4 text-xs opacity-60">Scegli in segreto se dire la verità o inventare, poi scrivila: la vedranno tutti sullo schermo.</p>
+                <div className="flex flex-1 flex-col gap-3">
+                  <button onClick={() => setAnswer("verita")}
+                    className="press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold"
+                    style={{ background: C.lime, color: C.ink, boxShadow: "5px 5px 0 rgba(0,0,0,.45)" }}>
+                    Dico la verità
+                  </button>
+                  <button onClick={() => setAnswer("bluff")}
+                    className="press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold"
+                    style={{ background: C.flagRed, color: C.cream, boxShadow: "5px 5px 0 rgba(0,0,0,.45)" }}>
+                    Bluffo
+                  </button>
+                </div>
+              </>
+            ) : bluffSent ? (
+              <p className="mt-2 text-center text-sm opacity-70">Inviato. Guardate lo schermo grande.</p>
+            ) : (
+              <div className="flex flex-1 flex-col">
+                <p className="mb-2 text-xs opacity-60">{answer === "bluff" ? "Scrivi qualcosa di inventato ma credibile:" : "Scrivi la verità:"}</p>
+                <textarea value={bluffText} onChange={(e) => setBluffText(e.target.value.slice(0, 200))} rows={5}
+                  placeholder="La tua risposta..." autoFocus
+                  className="mb-3 w-full flex-1 resize-none border-2 p-3 text-base"
+                  style={{ background: C.cream, color: C.ink, borderColor: C.ink }} />
+                <button onClick={() => sendRfBluff(answer, bluffText)} disabled={!bluffText.trim()}
+                  className="press w-full py-4 text-xl uppercase"
+                  style={{ background: bluffText.trim() ? C.flagRed : "rgba(255,243,230,.12)", color: bluffText.trim() ? C.cream : "rgba(255,243,230,.5)" }}>
+                  Invia
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
             <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: "rgba(255,31,61,.15)", color: C.flagRed }}>🎭 Bluff</span>
             <p className="text-2xl font-bold" style={{ color: C.flagRed }}>{s.targetName}</p>
-            <p className="mt-2 max-w-xs text-sm opacity-70">Sta decidendo sul suo telefono. Ascolta cosa dice a voce: dovrai giudicare.</p>
+            <p className="mt-2 max-w-xs text-sm opacity-70">Sta scrivendo la sua risposta. Guardate lo schermo grande.</p>
           </div>
         )
       )}
@@ -6426,7 +6538,8 @@ function Player({ onExit }) {
         ) : (
           <div className="tvin flex flex-1 flex-col">
             <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: "rgba(255,31,61,.15)", color: C.flagRed }}>Verità o bluff, per {s.targetName}?</span>
-            <p className="mb-3 text-sm opacity-70">{s.card?.q}</p>
+            <p className="mb-1 text-xs opacity-60">{s.card?.q}</p>
+            <p className="mb-3 border-2 p-3 text-base font-bold" style={{ borderColor: C.flagRed }}>{s.bluffText}</p>
             <div className="flex flex-1 flex-col gap-3">
               <button onClick={() => sendRfBluffGuess("verita")} disabled={answer !== null}
                 className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${answer === "verita" ? "bump" : ""}`}
@@ -6447,6 +6560,7 @@ function Player({ onExit }) {
       {s?.phase === "rf-bluffres" && (
         <div key={s.rid} className="tvin flex flex-1 flex-col justify-center text-center">
           <p className="text-xs uppercase tracking-widest opacity-60">{s.targetName}</p>
+          <p className="mx-auto mb-2 max-w-xs text-sm font-bold opacity-80">{s.bluffText}</p>
           <p className="my-2 text-3xl uppercase" style={{ ...display, color: s.bluffChoice === "bluff" ? C.flagRed : C.lime }}>
             {s.bluffChoice === "bluff" ? "Era un bluff" : "Era vero"}
           </p>
