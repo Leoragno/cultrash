@@ -1,5 +1,5 @@
 import { storage } from "./sync";
-import { pick, shuffle, kState, kPlayer, pPrefix, code, uid, encW, decW, rouColore, scrambleTiles } from "./game/utils";
+import { pick, shuffle, kState, kPlayer, pPrefix, code, uid, encW, decW, rouColore, scrambleTiles, matchGuess } from "./game/utils";
 import { sfx } from "./game/sound";
 import { narrate, stopNarration } from "./game/narrator";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
@@ -57,6 +57,8 @@ const MG = {
   roulette: { name: "LA ROULETTE", color: C.magenta, kind: "azzardo", rule: "Tredici caselle. Rosso, nero, pari o dispari pagano il doppio; il numero secco paga dodici volte. Lo zero verde si prende tutto." },
   russa: { name: "ROULETTE RUSSA", color: C.cyan, kind: "azzardo", rule: "Sei caselle, una sola è quella storta. Chi la sceglie lascia metà dei suoi punti, chi la evita ne guadagna 120. Nessuno sa dove sia finché non si apre." },
   vote: { name: "CHI DI VOI", color: C.arancio, kind: "vote", rule: "Niente risposta giusta: si vota una persona del gruppo. Il più votato incassa 150, chi indovina la maggioranza 60." },
+  canzone: { name: "INDOVINA LA CANZONE", color: C.gold, kind: "music", rule: "Partono i primi 10 secondi di una canzone: scrivi subito titolo e cantante dal telefono, 250 punti se li indovini entrambi, 150 solo il titolo. Non la conosci? Tocca «ancora 20 secondi» e riparte più lunga. Si va avanti solo quando tutti hanno risposto o passato, un minuto di tempo poi si chiude comunque." },
+  sigla: { name: "INDOVINA LA SIGLA", color: C.gold, kind: "music", rule: "Stessa regola di Indovina la Canzone, ma sono sigle di cartoni e telefilm: primi 10 secondi, poi eventualmente altri 20. Scrivi programma e cantante, o passa se non la conosci." },
 };
 
 const TEAM_MG = {
@@ -75,12 +77,16 @@ const MG_GROUPS = [
   { title: "Quiz e trabocchetti", desc: "Domanda, timer, risposta: le fondamenta della serata.", keys: ["verofalso", "indizi", "trabocchetto", "lampo", "citazioni"] },
   { title: "Rischio e azzardo", desc: "Si punta prima di sapere, o si scommette dopo aver risposto.", keys: ["doppio", "puntata", "ruota", "cavalli", "roulette", "russa"] },
   { title: "Indovina e sfida", desc: "Niente crocette: si stima, si duella, si vota.", keys: ["piumeno", "stima", "vote"] },
+  { title: "Musica", desc: "Si ascolta e si scrive: niente crocette, solo orecchio.", keys: ["canzone", "sigla"] },
 ];
 
 const PUZZLE_T = 100;
 const BET_T = 15;
 const BET_OPTS = [50, 150, 300];
 const AZZ_T = 25;
+const MUSIC_T = 60;
+const MUSIC_CLIP = 10;
+const MUSIC_EXT = 20;
 const CAVALLI = [
   { nome: "FULMINE DI SCORTA", quota: 2 },
   { nome: "ULTIMO TRENO", quota: 3 },
@@ -623,6 +629,31 @@ const WORDS = [
   { w: "BATTERIA", hint: "Si scarica sempre nel momento sbagliato" },
 ];
 
+/** Banche di Indovina la Canzone / Indovina la Sigla: `id` è il video YouTube,
+ *  `start` il secondo da cui parte la clip (regolabile a mano se il video ha
+ *  un'intro prima che entri il brano). Elenco volutamente corto: aggiungete
+ *  pure altre voci con lo stesso schema. */
+const MUSICA = [
+  { id: "QN1odfjtMoo", start: 0, title: "Zitti e Buoni", artist: "Måneskin" },
+  { id: "al36b7RqpEA", start: 0, title: "Non Dirgli Mai", artist: "Gigi D'Alessio" },
+  { id: "wUgwR6AazmE", start: 0, title: "Penso Positivo", artist: "Jovanotti" },
+  { id: "FpOEN93LX-E", start: 0, title: "La Solitudine", artist: "Laura Pausini" },
+  { id: "xqaWlaWeRpo", start: 0, title: "Perdono", artist: "Tiziano Ferro" },
+  { id: "wXFFtkQZlo8", start: 0, title: "Albachiara", artist: "Vasco Rossi" },
+  { id: "eTOKcxIujgE", start: 0, title: "Più Bella Cosa", artist: "Eros Ramazzotti" },
+  { id: "IQLBNq9Dl7Y", start: 0, title: "Azzurro", artist: "Adriano Celentano" },
+  { id: "rfaihaFlcSg", start: 0, title: "Ma il Cielo è Sempre Più Blu", artist: "Rino Gaetano" },
+  { id: "aiM_s07SXhY", start: 0, title: "Questo Piccolo Grande Amore", artist: "Claudio Baglioni" },
+];
+const SIGLE = [
+  { id: "oNRLrwrHQKo", start: 0, title: "Pokémon", artist: "Fabio Ingrosso" },
+  { id: "X6pYVRNyju8", start: 0, title: "Dragon Ball", artist: "Cristina D'Avena" },
+  { id: "yyBkhM9mCi0", start: 0, title: "Occhi di Gatto", artist: "Cristina D'Avena" },
+  { id: "C_rILKXxzDA", start: 0, title: "Kiss Me Licia", artist: "Cristina D'Avena" },
+  { id: "Dkuse9Uv9fM", start: 0, title: "Mila e Shiro, Due Cuori nella Pallavolo", artist: "Cristina D'Avena" },
+  { id: "wIWtCWoBn3E", start: 0, title: "Doraemon", artist: "Cristina D'Avena" },
+  { id: "YU1e43N1s4Q", start: 0, title: "I Cavalieri dello Zodiaco", artist: "Wake Up" },
+];
 
 const TEAM_COLORS = [C.magenta, C.lime, C.cyan, C.gold];
 const MAX_TEAMS = 4;
@@ -2014,6 +2045,7 @@ const CSS = `
 @keyframes presenterTalk{0%,100%{transform:scaleY(.45)}50%{transform:scaleY(1)}}
 @keyframes presenterGlow{0%,100%{opacity:.35;transform:scale(1)}50%{opacity:.65;transform:scale(1.1)}}
 @keyframes presenterMicPulse{0%{transform:scale(.5);opacity:.7}100%{transform:scale(2.4);opacity:0}}
+@keyframes eqBar{0%,100%{transform:scaleY(.3)}50%{transform:scaleY(1)}}
 .tvin{animation:tvin .3s ease-out}
 .glow{animation:glow 1.4s ease-in-out infinite}
 .pop{animation:pop .25s ease-out both}
@@ -2044,7 +2076,8 @@ input{font-family:inherit}
 .presenter-mouth-talk{transform-box:fill-box;transform-origin:center;animation:presenterTalk .22s ease-in-out infinite}
 .presenter-glow{animation:presenterGlow 2.2s ease-in-out infinite}
 .presenter-mic-pulse{transform-box:fill-box;transform-origin:center;animation:presenterMicPulse 1s ease-out infinite}
-@media (prefers-reduced-motion:reduce){.tvin,.glow,.pop,.shake,.buzzer-on,.buzzer-hot,.bump,.rise-in,.confetti-piece,.sweep-bar,.gallop,.spin-face,.tick-pulse,.wheel-idle,.stamp-in,.slide-l,.slide-r,.grow-up,.flag-wave,.rf-scan::after,.presenter-bob,.presenter-blink,.presenter-mouth-talk,.presenter-glow,.presenter-mic-pulse{animation:none!important}}
+.eq-bar{display:inline-block;width:8px;height:36px;border-radius:2px;transform-origin:bottom;animation:eqBar .9s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.tvin,.glow,.pop,.shake,.buzzer-on,.buzzer-hot,.bump,.rise-in,.confetti-piece,.sweep-bar,.gallop,.spin-face,.tick-pulse,.wheel-idle,.stamp-in,.slide-l,.slide-r,.grow-up,.flag-wave,.rf-scan::after,.presenter-bob,.presenter-blink,.presenter-mouth-talk,.presenter-glow,.presenter-mic-pulse,.eq-bar{animation:none!important}}
 `;
 
 const CONFETTI_COLORS = [C.magenta, C.lime, C.gold, C.cyan, C.arancio, C.cream];
@@ -2227,6 +2260,88 @@ function HorseRace({ cavalli, winner, racing }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** Carica l'IFrame API di YouTube una sola volta per pagina, riusando il
+ *  caricamento in corso se un secondo player la richiede prima che finisca. */
+let ytApiPromise = null;
+function loadYT() {
+  if (window.YT && window.YT.Player) return Promise.resolve(window.YT);
+  if (!ytApiPromise) {
+    ytApiPromise = new Promise((resolve) => {
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { prev?.(); resolve(window.YT); };
+      if (!document.getElementById("yt-iframe-api")) {
+        const tag = document.createElement("script");
+        tag.id = "yt-iframe-api";
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+      }
+    });
+  }
+  return ytApiPromise;
+}
+
+/** Player YouTube nascosto: suona sullo schermo host senza mostrare video o
+ *  titolo (spoilerebbe la risposta). Riproduce `MUSIC_CLIP` secondi dal punto
+ *  `start`, poi si mette in pausa; quando `extended` diventa vero riprende da
+ *  dove si era fermato per altri `MUSIC_EXT` secondi. */
+function MusicPlayer({ videoId, start, extended }) {
+  const hostRef = useRef(null);
+  const playerRef = useRef(null);
+  const pauseTORef = useRef(null);
+  const extendedAppliedRef = useRef(false);
+  const [blocked, setBlocked] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    extendedAppliedRef.current = false;
+    setBlocked(false);
+    loadYT().then((YT) => {
+      if (cancelled || !hostRef.current) return;
+      playerRef.current = new YT.Player(hostRef.current, {
+        videoId,
+        playerVars: { autoplay: 1, start: start || 0, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1 },
+        events: {
+          onReady: (e) => {
+            e.target.unMute?.();
+            const p = e.target.playVideo();
+            if (p && typeof p.catch === "function") p.catch(() => setBlocked(true));
+            clearTimeout(pauseTORef.current);
+            pauseTORef.current = setTimeout(() => { try { e.target.pauseVideo(); } catch (_) {} }, MUSIC_CLIP * 1000);
+          },
+          onStateChange: (e) => { if (e.data === 1) setBlocked(false); },
+        },
+      });
+    });
+    return () => {
+      cancelled = true;
+      clearTimeout(pauseTORef.current);
+      try { playerRef.current?.destroy(); } catch (_) {}
+      playerRef.current = null;
+    };
+  }, [videoId, start]);
+
+  useEffect(() => {
+    if (!extended || extendedAppliedRef.current || !playerRef.current) return;
+    extendedAppliedRef.current = true;
+    try { playerRef.current.playVideo(); } catch (_) {}
+    clearTimeout(pauseTORef.current);
+    pauseTORef.current = setTimeout(() => { try { playerRef.current?.pauseVideo(); } catch (_) {} }, MUSIC_EXT * 1000);
+  }, [extended]);
+
+  return (
+    <div className="flex flex-col items-center gap-3">
+      <div style={{ width: 2, height: 2, overflow: "hidden", opacity: 0 }} aria-hidden="true"><div ref={hostRef} /></div>
+      <span className="text-7xl">🎧</span>
+      {blocked && (
+        <button onClick={() => { try { playerRef.current?.playVideo(); } catch (_) {} }} className="press px-4 py-2 text-sm font-bold uppercase"
+          style={{ background: C.gold, color: C.ink }}>
+          ▶ Tocca per avviare l'audio
+        </button>
+      )}
     </div>
   );
 }
@@ -2561,7 +2676,7 @@ function Host({ onExit }) {
 
       /* schermate di rivelazione: si va avanti da soli quando la maggioranza
        * dei giocatori ha votato "avanti" dal telefono, senza aspettare l'host. */
-      if (cur.phase === "result" || cur.phase === "voteres" || cur.phase === "azzardores" || cur.phase === "puzzleres" || cur.phase === "spicyres") {
+      if (cur.phase === "result" || cur.phase === "voteres" || cur.phase === "azzardores" || cur.phase === "puzzleres" || cur.phase === "spicyres" || cur.phase === "musicres") {
         await Promise.all(playersRef.current.map(async (p) => {
           if (ansRef.current[p.id]) return;
           try {
@@ -2649,6 +2764,33 @@ function Host({ onExit }) {
         if (playersRef.current.length && playersRef.current.every((p) => ansRef.current[p.id])) resolve();
         return;
       }
+      if (cur.phase === "music") {
+        let wantExtend = false;
+        await Promise.all(playersRef.current.map(async (p) => {
+          if (ansRef.current[p.id]) return;
+          try {
+            const r = await storage.get(kPlayer(room, p.id), true);
+            const d = JSON.parse(r.value);
+            if (d.rid !== cur.rid) return;
+            if (d.pass) {
+              ansRef.current[p.id] = { pass: true };
+              setAnswered((a) => ({ ...a, [p.id]: true }));
+            } else if (d.title || d.artist) {
+              ansRef.current[p.id] = { title: d.title || "", artist: d.artist || "" };
+              setAnswered((a) => ({ ...a, [p.id]: true }));
+            } else if (d.extend) {
+              wantExtend = true;
+            }
+          } catch (_) {}
+        }));
+        if (wantExtend && !cur.extended) {
+          const nextState = { ...cur, extended: true };
+          setG(nextState);
+          await push({ ...nextState, players: pub(playersRef.current), room });
+        }
+        if (playersRef.current.length && playersRef.current.every((p) => ansRef.current[p.id])) resolve();
+        return;
+      }
       if (cur.phase !== "quiz" && cur.phase !== "vote") return;
 
       await Promise.all(playersRef.current.map(async (p) => {
@@ -2683,7 +2825,7 @@ function Host({ onExit }) {
 
   /* timer */
   useEffect(() => {
-    if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle" && g.phase !== "bet" && g.phase !== "azzardo" && g.phase !== "spicy")) return;
+    if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle" && g.phase !== "bet" && g.phase !== "azzardo" && g.phase !== "spicy" && g.phase !== "music")) return;
     if (left <= 0) {
       // ultima scansione prima di chiudere il round: prende anche una risposta
       // arrivata a un soffio dallo scadere, che il poll regolare potrebbe non
@@ -3316,6 +3458,16 @@ function Host({ onExit }) {
       return it;
     };
 
+    if (b.kind === "mg" && (b.mg === "canzone" || b.mg === "sigla")) {
+      const bank = b.mg === "canzone" ? MUSICA : SIGLE;
+      const it = once(b.mg, bank, (x) => x.title);
+      const state = { phase: "music", rid, mg: b.mg, kind: "music", videoId: it.id, start: it.start || 0, extended: false, time: MUSIC_T, qn: doneQ() + 1, qtot: totQ(), blockLabel: MG_ALL[b.mg].name };
+      setG({ ...state, title: it.title, artist: it.artist });
+      setLeft(MUSIC_T);
+      await push({ ...state, players: pub(playersRef.current), room });
+      return;
+    }
+
     if (b.kind === "own") {
       cat = b.cat;
       q = draw(cat);
@@ -3401,7 +3553,7 @@ function Host({ onExit }) {
     advancingRef.current = true;
     try {
     const cur = gRef.current;
-    if (!cur || (cur.phase !== "quiz" && cur.phase !== "vote" && cur.phase !== "puzzle" && cur.phase !== "azzardo" && cur.phase !== "spicy")) return;
+    if (!cur || (cur.phase !== "quiz" && cur.phase !== "vote" && cur.phase !== "puzzle" && cur.phase !== "azzardo" && cur.phase !== "spicy" && cur.phase !== "music")) return;
     const ps = playersRef.current;
 
     if (cur.phase === "spicy") {
@@ -3482,6 +3634,33 @@ function Host({ onExit }) {
       setPlayers(updated2);
       setOutcome(res2);
       await push({ phase: "azzardores", rid: cur.rid, game: cur.game, esito, res: res2, blockLabel: MG_ALL[cur.game].name, players: pub(updated2), room });
+      ansRef.current = {}; setAnswered({});
+      return;
+    }
+
+    if (cur.phase === "music") {
+      const K = cfgRef.current.pmul;
+      updated = ps.map((p) => {
+        const a = ansRef.current[p.id];
+        let pts = 0, note = a?.pass ? "ha passato" : "silenzio";
+        if (a && !a.pass) {
+          const titleOk = matchGuess(a.title, cur.title);
+          const artistOk = a.artist && matchGuess(a.artist, cur.artist);
+          if (titleOk) {
+            pts = Math.round(150 * K);
+            note = "titolo giusto";
+            if (artistOk) { pts += Math.round(100 * K); note = "titolo e cantante"; }
+          } else {
+            note = "titolo sbagliato";
+          }
+        }
+        res[p.id] = { ok: pts > 0, pts, answered: !!a && !a.pass, note };
+        return { ...p, score: Math.max(0, p.score + pts), right: p.right + (pts > 0 ? 1 : 0), wrong: p.wrong + (pts > 0 ? 0 : 1) };
+      });
+      setG({ ...cur, phase: "musicres" });
+      setPlayers(updated);
+      setOutcome(res);
+      await push({ phase: "musicres", rid: cur.rid, mg: cur.mg, title: cur.title, artist: cur.artist, blockLabel: cur.blockLabel, res, players: pub(updated), room });
       ansRef.current = {}; setAnswered({});
       return;
     }
@@ -4047,13 +4226,13 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
     const key = `${g.phase}:${g.rid || ""}`;
     if (seenRef.current.key === key) return;
     seenRef.current.key = key;
-    if (["choose", "mgintro", "quiz", "vote", "puzzle", "bet", "azzardo", "spicy"].includes(g.phase)) sfx.whoosh();
+    if (["choose", "mgintro", "quiz", "vote", "puzzle", "bet", "azzardo", "spicy", "music"].includes(g.phase)) sfx.whoosh();
     else if (g.phase === "azzardores") { sfx.drumroll(); setTimeout(() => sfx.reveal(), 550); }
     else if (g.phase === "spicyres") { sfx.drumroll(); setTimeout(() => sfx.reveal(), 500); }
     else if (g.phase === "puzzleres") {
       const anyWin = outcome && Object.values(outcome).some((o) => o?.ok);
       (anyWin ? sfx.win : sfx.wrong)();
-    } else if (g.phase === "result" || g.phase === "voteres") {
+    } else if (g.phase === "result" || g.phase === "voteres" || g.phase === "musicres") {
       const vals = outcome ? Object.values(outcome) : [];
       const goodShare = vals.length ? vals.filter((o) => o?.pts > 0).length / vals.length : 0;
       (goodShare >= 0.5 ? sfx.correct : sfx.wrong)();
@@ -4062,7 +4241,7 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
 
   /* tick del timer negli ultimi secondi */
   useEffect(() => {
-    if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle" && g.phase !== "spicy")) return;
+    if (!g || (g.phase !== "quiz" && g.phase !== "vote" && g.phase !== "puzzle" && g.phase !== "spicy" && g.phase !== "music")) return;
     const secs = Math.ceil(left);
     if (secs === seenRef.current.tickAt) return;
     seenRef.current.tickAt = secs;
@@ -4170,6 +4349,51 @@ function HostGame({ g, left, T, players, answered, outcome, next, room, err, tea
             ))}
           </div>
           <p className="mt-6 text-xs opacity-50">Si gioca solo con i punti della partita. Nessun soldo, mai.</p>
+        </div>
+      )}
+
+      {(g.phase === "music" || g.phase === "musicres") && (
+        <div key={g.phase} className="tvin flex flex-1 flex-col">
+          {g.phase === "music" && (
+            <div className="mb-4 h-3 w-full" style={{ background: "rgba(255,243,230,.15)" }}>
+              <div className="h-3" style={{ width: `${(Math.max(0, left) / MUSIC_T) * 100}%`, background: left < 5 ? C.magenta : C.gold, transition: "width .2s linear" }} />
+            </div>
+          )}
+          <span className="mb-4 self-start -rotate-1 px-3 py-1 text-sm font-bold uppercase" style={{ background: C.gold, color: C.ink }}>{g.blockLabel}</span>
+
+          {g.phase === "music" ? (
+            <div className="flex flex-1 flex-col items-center justify-center text-center">
+              <MusicPlayer key={g.rid} videoId={g.videoId} start={g.start} extended={g.extended} />
+              <div className="mt-8 flex items-end justify-center gap-1" aria-hidden="true">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <span key={i} className="eq-bar" style={{ background: C.gold, animationDelay: `${i * 0.12}s` }} />
+                ))}
+              </div>
+              <p className="mt-6 text-2xl opacity-80">{g.extended ? "Altri 20 secondi in arrivo…" : "Primi 10 secondi in riproduzione"}</p>
+              <p className="mt-2 text-sm opacity-60">Titolo e artista si scrivono dal telefono. Chi non la conosce può chiedere altro ascolto, o passare.</p>
+            </div>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center text-center">
+              <p className="text-sm uppercase tracking-widest opacity-60">Era</p>
+              <p className="pop glow my-3 text-5xl uppercase" style={{ ...display, color: C.gold }}>{g.title}</p>
+              <p className="text-2xl opacity-80">{g.artist}</p>
+              <div className="mt-6 w-full space-y-2">
+                {players.map((p, i) => (
+                  <div key={p.id} className="rise-in flex items-center gap-3 border-2 px-4 py-3" style={{ borderColor: outcome?.[p.id]?.pts > 0 ? C.lime : "rgba(255,243,230,.15)", animationDelay: `${i * 0.06}s` }}>
+                    <span className="flex-1 text-2xl font-bold" style={{ color: p.color }}>{p.name}</span>
+                    <span className="text-sm opacity-70">{outcome?.[p.id]?.note}</span>
+                    <span className="bump text-2xl font-bold" style={{ color: outcome?.[p.id]?.pts > 0 ? C.lime : "rgba(255,243,230,.5)" }}>
+                      {outcome?.[p.id]?.pts > 0 ? `+${outcome[p.id].pts}` : "0"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-6 text-center text-sm opacity-60">{Object.keys(answered).length}/{players.length} pronti per continuare</p>
+              <button onClick={goNext} className="press mt-2 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.cream, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
+                {g.qn >= g.qtot ? "Verdetto finale" : "Avanti"}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -5059,6 +5283,68 @@ function PuzzleRound({ s, id, write }) {
 }
 
 
+/** Indovina la Canzone / la Sigla: titolo+artista da scrivere appena si è
+ *  sicuri, "ancora 20 secondi" per chi non la conosce ancora, "passo" per chi
+ *  rinuncia. Il round va avanti solo quando ognuno ha fatto una delle due. */
+function MusicRound({ s, write }) {
+  const [title, setTitle] = useState("");
+  const [artist, setArtist] = useState("");
+  const [sent, setSent] = useState(false);
+  const [passed, setPassed] = useState(false);
+  const [extendSent, setExtendSent] = useState(false);
+  const canSend = title.trim() || artist.trim();
+
+  async function submit() {
+    if (sent || passed || !canSend) return;
+    setSent(true);
+    const ok = await write({ rid: s.rid, title: title.trim().slice(0, 60), artist: artist.trim().slice(0, 60) });
+    if (!ok) setSent(false);
+  }
+  async function doPass() {
+    if (sent || passed) return;
+    setPassed(true);
+    const ok = await write({ rid: s.rid, pass: true });
+    if (!ok) setPassed(false);
+  }
+  async function extend() {
+    if (extendSent || s.extended) return;
+    setExtendSent(true);
+    await write({ rid: s.rid, extend: true });
+  }
+
+  const done = sent || passed;
+  return (
+    <div className="tvin flex flex-1 flex-col">
+      <p className="mb-1 text-xs font-bold uppercase" style={{ color: C.gold }}>{s.extended ? "Ascolta ancora" : "Ascolta l'inizio"}</p>
+      <p className="mb-4 text-sm opacity-70">Scrivi titolo e artista appena li riconosci. Non basta? Chiedi altri 20 secondi.</p>
+      {!done ? (
+        <>
+          <input value={title} onChange={(e) => setTitle(e.target.value.slice(0, 60))} placeholder="Titolo della canzone"
+            className="w-full border-2 bg-transparent px-4 py-4 text-lg font-bold" style={{ borderColor: C.gold, color: C.cream }} />
+          <input value={artist} onChange={(e) => setArtist(e.target.value.slice(0, 60))} placeholder="Artista / cantante"
+            className="mt-3 w-full border-2 bg-transparent px-4 py-4 text-lg font-bold" style={{ borderColor: "rgba(255,243,230,.3)", color: C.cream }} />
+          <button onClick={submit} disabled={!canSend} className="press mt-3 w-full py-4 text-2xl uppercase"
+            style={{ ...display, background: canSend ? C.gold : "rgba(255,243,230,.15)", color: canSend ? C.ink : "rgba(255,243,230,.4)" }}>
+            Manda la risposta
+          </button>
+          <button onClick={extend} disabled={extendSent || s.extended} className="press mt-3 w-full border-2 py-3 text-sm font-bold uppercase tracking-wide"
+            style={{ borderColor: C.cyan, background: "transparent", color: (extendSent || s.extended) ? "rgba(255,243,230,.4)" : C.cyan }}>
+            {s.extended ? "Altri 20 secondi in arrivo" : extendSent ? "Richiesta inviata" : "Non lo so, ancora 20 secondi"}
+          </button>
+          <button onClick={doPass} className="press mt-2 w-full py-3 text-sm font-bold uppercase tracking-wide opacity-70">
+            Passo, non la conosco
+          </button>
+        </>
+      ) : (
+        <div className="pop mt-4 px-4 py-6 text-center" style={{ background: sent ? C.gold : "rgba(255,243,230,.08)", color: sent ? C.ink : C.cream }}>
+          <p className="text-2xl uppercase" style={display}>{sent ? "Risposta inviata" : "Hai passato"}</p>
+          <p className="mt-1 text-sm font-bold opacity-80">Aspetta gli altri…</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============================================================
    PLAYER
    ============================================================ */
@@ -5503,6 +5789,24 @@ function Player({ onExit }) {
           <p className="pop glow my-2 text-5xl uppercase" style={{ ...display, color: C.gold }}>{s.esito.label}</p>
           <div className={`mt-4 px-4 py-5 ${mine?.pts > 0 ? "pop" : "shake"}`} style={{ background: mine?.pts > 0 ? C.lime : C.magenta, color: mine?.pts > 0 ? C.ink : C.cream }}>
             <p className="text-4xl uppercase" style={display}>{mine?.pts > 0 ? `+${mine.pts}` : mine?.pts ?? 0}</p>
+            <p className="text-sm font-bold">{mine?.note}</p>
+          </div>
+          <button onClick={sendReady} disabled={ready} className="press mt-6 w-full py-4 text-xl uppercase"
+            style={{ ...display, background: ready ? "rgba(255,243,230,.12)" : C.lime, color: ready ? "rgba(255,243,230,.5)" : C.ink }}>
+            {ready ? "Aspettando gli altri…" : "Avanti"}
+          </button>
+        </div>
+      )}
+
+      {s?.phase === "music" && <MusicRound key={s.rid} s={s} write={write} />}
+
+      {s?.phase === "musicres" && (
+        <div className="tvin flex flex-1 flex-col justify-center text-center">
+          <p className="text-xs uppercase tracking-widest opacity-60">Era</p>
+          <p className="pop glow my-2 text-3xl uppercase" style={{ ...display, color: C.gold }}>{s.title}</p>
+          <p className="text-lg opacity-80">{s.artist}</p>
+          <div className={`mt-4 px-4 py-5 ${mine?.pts > 0 ? "pop" : "shake"}`} style={{ background: mine?.pts > 0 ? C.lime : "rgba(255,243,230,.08)", color: mine?.pts > 0 ? C.ink : C.cream }}>
+            <p className="text-4xl uppercase" style={display}>{mine?.pts > 0 ? `+${mine.pts}` : "0 punti"}</p>
             <p className="text-sm font-bold">{mine?.note}</p>
           </div>
           <button onClick={sendReady} disabled={ready} className="press mt-6 w-full py-4 text-xl uppercase"

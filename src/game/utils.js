@@ -66,6 +66,27 @@ export function scrambleTiles(N, BLANK, depth) {
   return t;
 }
 
+/** Normalizza per confrontare risposte scritte a mano: minuscolo, senza
+ *  accenti/punteggiatura, spazi collassati. */
+export function normText(s) {
+  return (s || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Vero se la risposta scritta è abbastanza vicina al titolo/artista giusto:
+ *  uguale dopo normalizzazione, o uno dei due testi contiene per intero
+ *  l'altro (tollera "The" iniziali, sigle abbreviate, refusi di punteggiatura). */
+export function matchGuess(guess, target) {
+  const g = normText(guess), t = normText(target);
+  if (!g || !t) return false;
+  if (g === t) return true;
+  return g.length >= 3 && (t.includes(g) || g.includes(t));
+}
+
 /** Una squadra è valida se ha almeno due membri e nessuno resta fuori. */
 export function teamsValid(players, formation) {
   if (formation === "solo") return players.length >= 2;
