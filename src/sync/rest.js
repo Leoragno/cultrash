@@ -31,10 +31,10 @@ export const restStorage = {
     return { key, value: d.value, shared: true };
   },
 
-  async set(key, value) {
+  async set(key, value, shared, ttlMs) {
     await chiama(`/kv/${encodeURIComponent(key)}`, {
       method: "PUT",
-      body: JSON.stringify({ value }),
+      body: JSON.stringify({ value, ttlMs }),
     });
     return { key, value, shared: true };
   },

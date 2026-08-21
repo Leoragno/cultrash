@@ -68,15 +68,18 @@ app.get("/api/kv/:key", (req, res) => {
   res.json({ value: v.valore });
 });
 
+const TTL_MAX_MS = 1000 * 60 * 60 * 24 * 366 * 2; // tetto di sicurezza: due anni, per i profili "account"
+
 app.put("/api/kv/:key", (req, res) => {
-  const { value } = req.body ?? {};
+  const { value, ttlMs } = req.body ?? {};
   if (typeof value !== "string") return res.status(400).json({ errore: "value deve essere una stringa" });
   if (value.length > MAX_VALORE) return res.status(413).json({ errore: "valore troppo grande" });
   if (!deposito.has(req.params.key) && deposito.size >= MAX_CHIAVI) {
     pulisci();
     if (deposito.size >= MAX_CHIAVI) return res.status(507).json({ errore: "spazio esaurito" });
   }
-  deposito.set(req.params.key, { valore: value, scade: Date.now() + TTL_MS });
+  const durata = Number.isFinite(ttlMs) && ttlMs > 0 ? Math.min(ttlMs, TTL_MAX_MS) : TTL_MS;
+  deposito.set(req.params.key, { valore: value, scade: Date.now() + durata });
   res.json({ ok: true });
 });
 

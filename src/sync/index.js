@@ -13,7 +13,11 @@
  *
  * L'interfaccia è volutamente identica a quella dello storage degli
  * artifact Claude, così il codice di gioco resta invariato:
- *   get(key, shared) / set(key, value, shared) / list(prefix, shared) / delete(key, shared)
+ *   get(key, shared) / set(key, value, shared, ttlMs?) / list(prefix, shared) / delete(key, shared)
+ *
+ * `ttlMs` è opzionale (default: la scadenza a sei ore delle stanze) — usato
+ * per il profilo giocatore (vedi PROFILE_TTL_MS in App.jsx), che deve
+ * sopravvivere ben più a lungo di una singola serata.
  */
 
 import { restStorage } from "./rest";

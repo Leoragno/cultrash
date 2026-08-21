@@ -681,6 +681,54 @@ const PCOL = [C.magenta, C.lime, C.cyan, C.gold, C.arancio, "#B87BFF", "#4DFFB0"
 const LETTERS = ["A", "B", "C", "D"];
 const HOST_TICK = 200, POLL_PLAYER = 1300, POLL_HOST = 1500;
 
+/** Profilo del giocatore (id, nome, colore, ultima stanza): l'id resta nel
+ *  localStorage del telefono — non nel sessionStorage, altrimenti chi chiude
+ *  la scheda per sbaglio a metà partita lo perde e riappare come un
+ *  giocatore fantasma che l'host non riconosce più — mentre nome e colore
+ *  vivono nello stesso database condiviso (Appwrite, o REST/local a seconda
+ *  di VITE_SYNC) usato per il resto del gioco, non in un deposito locale a
+ *  sé: così il profilo sopravvive anche a una pulizia del browser o al
+ *  passaggio a un altro dispositivo, non solo alla chiusura di una scheda.
+ *  La cache locale resta comunque la fonte immediata all'avvio (nessuno
+ *  spinner al caricamento): l'eventuale versione più recente sul database
+ *  arriva poco dopo e aggiorna silenziosamente lo stato. Nome e colore
+ *  restano liberamente modificabili in ogni momento: non è un vero login
+ *  con password, solo un'identità che si ricorda da sola. */
+const PROFILE_KEY = "cultrash:profile";
+const PROFILE_TTL_MS = 1000 * 60 * 60 * 24 * 365; // un profilo dura un anno, non sei ore come una stanza
+const kProfile = (id) => `cultrash:profile:${id}`;
+
+function loadLocalProfile() {
+  try {
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (raw) { const p = JSON.parse(raw); if (p && p.id) return p; }
+  } catch (_) {}
+  return null;
+}
+function saveLocalProfile(p) {
+  try { localStorage.setItem(PROFILE_KEY, JSON.stringify({ ...(loadLocalProfile() || {}), ...p })); } catch (_) {}
+}
+/** Legge/riconcilia il profilo dal database condiviso: sull'id trovato in
+ *  locale (o uno nuovo, per il primo accesso in assoluto), prova a recuperare
+ *  nome/colore salvati altrove (es. da un altro dispositivo) e li fonde con
+ *  la cache locale, che vince in caso di conflitto perché più recente. */
+async function loadProfile() {
+  const local = loadLocalProfile();
+  if (!local) return null;
+  try {
+    const r = await storage.get(kProfile(local.id), true);
+    const remote = JSON.parse(r.value);
+    const merged = { ...local, name: local.name || remote.name, color: local.color || remote.color };
+    if (merged.name !== local.name || merged.color !== local.color) saveLocalProfile(merged);
+    return merged;
+  } catch (_) { return local; }
+}
+async function saveProfile(p) {
+  const merged = { ...(loadLocalProfile() || {}), ...p };
+  saveLocalProfile(merged);
+  try { await storage.set(kProfile(merged.id), JSON.stringify({ name: merged.name, color: merged.color }), true, PROFILE_TTL_MS); } catch (_) {}
+}
+
 /** Cronologia di ciò che è già stato proposto (domande e minigiochi), salvata
  *  sul dispositivo: così una nuova partita — anche in una stanza diversa —
  *  non ripropone da capo le stesse cose finché non si esaurisce il mazzo. */
@@ -1918,49 +1966,35 @@ const RF_SCELTA = [
   { lv: 4, q: "Cosa è più imperdonabile?", a: "Mentire per convenienza", b: "Dire una verità solo per ferire" },
 ];
 
-const RF_CONFESSIONE = [
-  { lv: 1, q: "Qual è la bugia più innocua che dici sempre?" },
-  { lv: 1, q: "Qual è il tuo peggior difetto in una relazione, secondo te?" },
-  { lv: 1, q: "Hai mai finto di stare bene per non rovinare una serata?" },
-  { lv: 2, q: "Hai mai mentito per evitare un impegno e poi hai detto «non significa niente»?" },
-  { lv: 2, q: "Hai mai tenuto due persone sulla corda nello stesso periodo?" },
-  { lv: 2, q: "Hai mai fatto ghosting a qualcuno di questo gruppo?" },
-  { lv: 2, q: "Hai mai usato «sono complicato/a» come scusa per non impegnarti?" },
-  { lv: 3, q: "Hai mai controllato il telefono di un/una partner di nascosto?" },
-  { lv: 3, q: "Hai mai fatto il/la interessante con qualcuno solo per far ingelosire un altro?" },
-  { lv: 3, q: "Hai mai promesso di richiamare e non l'hai mai fatto, di proposito?" },
-  { lv: 3, q: "Hai mai detto «ne parliamo dal vivo» solo per guadagnare tempo?" },
-  { lv: 3, q: "Hai mai fatto credere di essere single quando non lo eri?" },
-  { lv: 3, q: "Hai mai cancellato una chat per non farla vedere a nessuno?" },
-  { lv: 2, q: "Hai mai fatto un complimento a qualcuno solo per interesse?" },
-  { lv: 3, q: "Hai mai usato questo gruppo per farti notare da un ex?" },
-  { lv: 4, q: "Qual è la cosa più meschina che hai fatto per gelosia?" },
-  { lv: 4, q: "Hai mai sabotato di proposito la storia di qualcuno di questo gruppo?" },
-  { lv: 4, q: "Qual è la bugia più grossa che hai detto a qualcuno seduto qui?" },
-  { lv: 4, q: "Chi in questo gruppo tratteresti peggio se non ci fossero testimoni?" },
-];
-
 /** Voto segreto su un membro del gruppo: usata sia da «Chi è la Red Flag»
  *  sia, mescolata a RF_CAOS, dalla modalità «Caos». */
 const RF_VOTE = [
   { lv: 1, q: "Chi di voi manderebbe un vocale di scuse invece di chiamare?" },
   { lv: 1, q: "Chi di voi si offenderebbe per uno scherzo che ha fatto lui/lei mille volte?" },
   { lv: 1, q: "Chi di voi direbbe «non sono geloso/a» proprio mentre controlla l'orologio?" },
+  { lv: 1, q: "Chi di voi si offrirebbe volontario solo per farsi notare?" },
+  { lv: 1, q: "Chi di voi darebbe buca all'ultimo con la scusa più debole?" },
   { lv: 2, q: "Chi di voi ha già fatto ghosting a qualcuno senza sensi di colpa?" },
   { lv: 2, q: "Chi di voi controllerebbe il telefono del/della partner, anche solo una volta?" },
   { lv: 2, q: "Chi di voi direbbe «sto bene» mentre sta malissimo?" },
   { lv: 2, q: "Chi di voi ha una lista segreta di ex da non nominare mai?" },
+  { lv: 2, q: "Chi di voi risponderebbe «dipende» a una domanda che meritava un sì o un no?" },
+  { lv: 2, q: "Chi di voi terrebbe un profilo social solo per tenere d'occhio un ex?" },
+  { lv: 2, q: "Chi di voi userebbe un amico come spalla per far ingelosire qualcuno?" },
   { lv: 3, q: "Chi di voi cambierebbe versione dei fatti a seconda di chi ascolta?" },
   { lv: 3, q: "Chi di voi terrebbe un segreto del gruppo, ma solo se conveniente?" },
   { lv: 3, q: "Chi di voi sparirebbe da una chat di gruppo senza spiegazioni?" },
   { lv: 3, q: "Chi di voi giurerebbe di essere cambiato/a, sapendo di non esserlo?" },
   { lv: 3, q: "Chi di voi userebbe «non voglio etichette» per non impegnarsi davvero?" },
-  { lv: 2, q: "Chi di voi risponderebbe «dipende» a una domanda che meritava un sì o un no?" },
   { lv: 3, q: "Chi di voi ha già mentito su dove si trovava, anche per una cosa innocua?" },
   { lv: 3, q: "Chi di voi lascerebbe in sospeso qualcuno solo per tenerselo come piano B?" },
   { lv: 3, q: "Chi di voi farebbe il doppio gioco pur di non deludere nessuno?" },
+  { lv: 3, q: "Chi di voi ha già baciato qualcuno solo per non deludere l'atmosfera?" },
+  { lv: 3, q: "Chi di voi terrebbe una relazione segreta anche da questo gruppo?" },
   { lv: 4, q: "Chi di voi mentirebbe spudoratamente in faccia a un amico, se gli convenisse?" },
   { lv: 4, q: "Chi di voi tradirebbe la fiducia del gruppo per una storia che finirà comunque male?" },
+  { lv: 4, q: "Chi di voi è già stato/a infedele senza che nessuno qui lo sapesse?" },
+  { lv: 4, q: "Chi di voi sceglierebbe il sesso occasionale a un legame vero, se potesse ammetterlo?" },
 ];
 
 /** Hot Seat: domanda d'apertura per lanciare l'interrogatorio dal vivo —
@@ -1986,14 +2020,18 @@ const RF_HOTSEAT = [
 /** Carte «Caos»: pescate a caso, votano tutti, il tema cambia ogni volta. */
 const RF_CAOS = [
   { lv: 1, q: "Chi di voi rovinerebbe una sorpresa solo perché non resiste a stare zitto/a?" },
+  { lv: 1, q: "Chi di voi si venderebbe un amico per un piatto buono?" },
   { lv: 2, q: "Chi di voi si farebbe corrompere più facilmente con del cibo?" },
   { lv: 2, q: "Chi di voi mentirebbe su un alibi per coprire un amico, senza fare domande?" },
+  { lv: 2, q: "Chi di voi cambierebbe idea su tutto pur di non litigare?" },
   { lv: 3, q: "Chi di voi sarebbe capace di sabotare una serata altrui per gelosia?" },
   { lv: 3, q: "Chi di voi cambia gruppo di amici più spesso senza spiegare perché?" },
   { lv: 3, q: "Chi di voi accetterebbe soldi per sparire da una vita per un mese?" },
+  { lv: 3, q: "Chi di voi manipolerebbe una situazione per farsi vedere come la vittima?" },
   { lv: 4, q: "Chi di voi tradirebbe questo gruppo per un posto tra le persone «giuste»?" },
   { lv: 4, q: "Chi di voi è più bravo a fingere di non aver fatto qualcosa che ha fatto?" },
   { lv: 4, q: "Chi di voi lascerebbe indietro qualcuno del gruppo se le cose si mettessero male?" },
+  { lv: 4, q: "Chi di voi userebbe un segreto di qualcuno qui per avere la meglio in una lite?" },
   { lv: 1, q: "Chi di voi convincerebbe tutti a fare una follia e poi si tirerebbe indietro per primo?" },
 ];
 
@@ -2008,13 +2046,21 @@ const RF_BLUFF = [
   { lv: 2, q: "Qual è il messaggio più imbarazzante che hai mandato a una crush?" },
   { lv: 2, q: "Qual è il motivo più assurdo che hai inventato per aver ignorato un messaggio?" },
   { lv: 2, q: "Qual è la scusa che hai dato quando ti hanno beccato a guardare il profilo di un ex?" },
+  { lv: 2, q: "Qual è la ragione vera per cui hai chiuso l'ultima storia, quella che non hai mai detto agli altri?" },
   { lv: 3, q: "Qual è la bugia più grossa che hai detto per coprire un amico in una serata andata male?" },
   { lv: 3, q: "Qual è la scusa che hai dato quando ti hanno beccato a stalkerare qualcuno sui social?" },
   { lv: 3, q: "Qual è la bugia che hai detto per non ammettere di avere ancora sentimenti per un ex?" },
   { lv: 3, q: "Qual è la versione dei fatti che hai dato per nascondere una tua gelosia?" },
+  { lv: 3, q: "Qual è la cosa più vera che hai negato a un amico per paura del suo giudizio?" },
+  { lv: 3, q: "Qual è la volta in cui hai finto di essere felice per qualcuno, mentre in realtà eri geloso/a?" },
+  { lv: 3, q: "Qual è il motivo reale, mai detto a nessuno, per cui hai perso i contatti con un ex amico?" },
   { lv: 4, q: "Qual è la bugia più cattiva che hai detto per proteggere solo te stesso/a?" },
   { lv: 4, q: "Qual è il segreto più grosso che hai sempre negato?" },
   { lv: 4, q: "Qual è la bugia più grossa che hai detto in faccia a un amico?" },
+  { lv: 4, q: "Qual è la cosa più grave che hai fatto e per cui non hai mai chiesto scusa davvero?" },
+  { lv: 4, q: "Qual è il tradimento, anche non fisico, che hai fatto e non hai mai confessato?" },
+  { lv: 4, q: "Qual è la bugia sessuale più grossa che hai detto a un/una partner?" },
+  { lv: 4, q: "Qual è la cosa più spinta che hai fatto con qualcuno seduto in questo gruppo?" },
 ];
 
 /** «Crush»: stesso schema di «Chi è la Red Flag» — voto segreto — ma sul
@@ -2023,20 +2069,24 @@ const RF_CRUSH = [
   { lv: 1, q: "Chi di voi flirterebbe pur di vincere un gioco?" },
   { lv: 1, q: "Chi di voi arrossisce più facilmente se lo prendono in giro per una cotta?" },
   { lv: 1, q: "Chi di voi ha la cotta più ovvia del gruppo, che notano tutti tranne l'interessato/a?" },
+  { lv: 1, q: "Chi di voi cambierebbe outfit last minute se sapesse che c'è la sua crush?" },
   { lv: 2, q: "Chi di voi ha già avuto una cotta per qualcuno seduto in questa stanza?" },
   { lv: 2, q: "Chi di voi manderebbe un messaggio a una crush solo per farsi vedere online?" },
   { lv: 2, q: "Chi di voi ha già fatto il tenero solo per attirare l'attenzione di qualcuno qui?" },
   { lv: 2, q: "Chi di voi ha una lista di cotte più lunga di quanto ammetta?" },
-  { lv: 3, q: "Chi di voi ha una cotta segreta che non ha mai confessato a nessuno?" },
+  { lv: 2, q: "Chi di voi flirterebbe con due persone nella stessa serata senza pensarci due volte?" },
+  { lv: 3, q: "Chi di voi ha una cotta segreta che non ha mai ammesso a nessuno?" },
   { lv: 3, q: "Chi di voi cambierebbe programma se sapesse che la sua crush si presenta?" },
   { lv: 3, q: "Chi di voi ha già mentito su chi gli piace davvero?" },
   { lv: 3, q: "Chi di voi si è già ingelosito/a per una cotta non corrisposta?" },
+  { lv: 3, q: "Chi di voi terrebbe la cover con più cura se sapesse che la sua crush segue questo gruppo?" },
   { lv: 4, q: "Chi di voi ha già provato a rimorchiare l'ex di un amico?" },
-  { lv: 4, q: "Chi di voi confesserebbe una cotta per il/la partner di qualcun altro qui presente?" },
+  { lv: 4, q: "Chi di voi ammetterebbe una cotta per il/la partner di qualcun altro qui presente?" },
   { lv: 4, q: "Chi di voi flirterebbe con la crush di un amico pensando di non essere scoperto?" },
+  { lv: 4, q: "Chi di voi ha già baciato la persona sbagliata solo per gelosia verso un'altra?" },
 ];
 
-const RF_SCELTA_T = 60, RF_CONF_T = 60, RF_VOTE_T = 60, RF_HOTSEAT_T = 60, RF_HOTSEAT_VOTE_T = 60, RF_BLUFF_T = 60, RF_BLUFFVOTE_T = 60;
+const RF_SCELTA_T = 60, RF_VOTE_T = 60, RF_HOTSEAT_T = 60, RF_HOTSEAT_VOTE_T = 60, RF_BLUFF_T = 60, RF_BLUFFVOTE_T = 60;
 
 /** I sei titoli finali, assegnati sulle statistiche raccolte durante la partita. */
 const RF_TITLES = [
@@ -2044,7 +2094,7 @@ const RF_TITLES = [
   { key: "heartbreaker", emoji: "😏", label: "Heartbreaker", pick: (st) => [...st].sort((a, b) => b.votedFor - a.votedFor)[0] },
   { key: "suprema", emoji: "🚩", label: "Red Flag Suprema", pick: (st) => [...st].sort((a, b) => b.flags - a.flags)[0] },
   { key: "bugiardo", emoji: "🎭", label: "Bugiardo/a", pick: (st) => [...st].sort((a, b) => b.bluffBeccato - a.bluffBeccato)[0] },
-  { key: "nonconfessa", emoji: "🫣", label: "Non confessa mai", pick: (st) => [...st].sort((a, b) => b.passiConf - a.passiConf)[0] },
+  { key: "muro", emoji: "🙊", label: "Il Muro", pick: (st) => [...st].sort((a, b) => b.passiHot - a.passiHot)[0] },
   { key: "peggiore", emoji: "😂", label: "Peggior decisione", pick: (st) => [...st].sort((a, b) => b.sceltaMancate - a.sceltaMancate)[0] },
 ];
 
@@ -2569,15 +2619,75 @@ function MusicPlayer({ videoId, start, extended }) {
 /* ============================================================ */
 export default function CultrashParty() {
   const [role, setRole] = useState(null);
+  const [profile, setProfile] = useState(() => loadLocalProfile());
   const ok = storage.available;
+
+  // La cache locale è la fonte immediata (niente spinner all'avvio); il
+  // database condiviso viene interrogato subito dopo, in sordina, solo per
+  // recuperare un nome/colore scelti altrove — vedi loadProfile più sopra.
+  useEffect(() => {
+    let stop = false;
+    if (profile) loadProfile().then((p) => { if (!stop && p) setProfile(p); });
+    return () => { stop = true; };
+  }, []); // eslint-disable-line
+
   return (
     <div style={shell}>
       <style>{CSS}</style>
       <FullscreenToggle />
-      {!role && <Roles onPick={setRole} storageOk={!!ok} />}
+      {profile && !role && <ProfileBadge profile={profile} onEdit={() => setProfile(null)} />}
+      {!profile && <Login onDone={setProfile} />}
+      {profile && !role && <Roles onPick={setRole} storageOk={!!ok} />}
       {role === "idee" && <Suggest onExit={() => setRole(null)} />}
       {role === "host" && <Host onExit={() => setRole(null)} />}
-      {role === "player" && <Player onExit={() => setRole(null)} />}
+      {role === "player" && <Player onExit={() => setRole(null)} profile={profile} />}
+    </div>
+  );
+}
+
+/* ============================================================
+   LOGIN — identità del dispositivo (nome + colore): niente password,
+   ma nome e colore vivono comunque nel database condiviso (vedi
+   loadProfile/saveProfile più sopra), non solo nel telefono. Passaggio
+   obbligato prima di scegliere schermo principale o giocatore, così chi
+   chiude la scheda per sbaglio ritrova la stessa identità al rientro
+   invece di dover ripartire da un profilo vuoto (vedi Player più sotto
+   per il riaggancio alla partita in corso). Nome e colore restano
+   comunque modificabili in ogni momento dal link «cambia» nella
+   schermata successiva, o riaprendo questa.
+   ============================================================ */
+function Login({ onDone }) {
+  const existing = loadLocalProfile();
+  const [name, setName] = useState(existing?.name || "");
+  const [color, setColor] = useState(existing?.color || PCOL[Math.floor(Math.random() * PCOL.length)]);
+
+  function submit() {
+    if (!name.trim()) return;
+    const p = { id: existing?.id || uid(), name: name.trim().slice(0, 12), color, room: existing?.room || "" };
+    saveProfile(p);
+    onDone(p);
+  }
+
+  return (
+    <div className="tvin mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-10">
+      <p className="mb-3 text-xs font-bold uppercase tracking-widest" style={{ color: C.lime }}>Prima di iniziare</p>
+      <h2 className="text-5xl uppercase" style={display}>Chi sei?</h2>
+      <p className="mb-6 text-sm opacity-70">Nome e colore ti riconoscono in stanza. Si possono cambiare quando vuoi.</p>
+      <input value={name} onChange={(e) => setName(e.target.value.slice(0, 12))} placeholder="Il tuo nome" autoFocus
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+        className="w-full border-2 bg-transparent px-4 py-4 text-2xl font-bold" style={{ borderColor: "rgba(255,243,230,.3)", color: C.cream }} />
+      <p className="mb-2 mt-4 text-xs font-bold uppercase tracking-widest opacity-60">Il tuo colore</p>
+      <div className="flex flex-wrap gap-2">
+        {PCOL.map((c) => (
+          <button key={c} type="button" onClick={() => setColor(c)} aria-label={c}
+            className="press h-10 w-10 border-2"
+            style={{ background: c, borderColor: color === c ? C.cream : "transparent" }} />
+        ))}
+      </div>
+      <button onClick={submit} disabled={!name.trim()} className="press mt-6 w-full py-5 text-3xl uppercase"
+        style={{ ...display, background: name.trim() ? C.magenta : "rgba(255,243,230,.12)", color: name.trim() ? C.cream : "rgba(255,243,230,.5)", boxShadow: name.trim() ? `6px 6px 0 ${C.lime}` : "none" }}>
+        Continua
+      </button>
     </div>
   );
 }
@@ -2602,6 +2712,19 @@ function FullscreenToggle() {
       className="press fixed right-3 top-3 z-50 flex h-10 w-10 items-center justify-center border-2 text-lg"
       style={{ borderColor: "rgba(255,243,230,.3)", background: "rgba(20,10,25,.55)", color: C.cream }}>
       {full ? "⤡" : "⤢"}
+    </button>
+  );
+}
+
+/** Icona in alto a destra con solo il nome: un tap riapre il login per
+ *  cambiare nome e colore. Sotto il pulsante schermo intero, non affianco,
+ *  così non si sovrappongono qualunque sia la lunghezza del nome. */
+function ProfileBadge({ profile, onEdit }) {
+  return (
+    <button onClick={onEdit} title="Cambia nome e colore"
+      className="press fixed right-3 top-16 z-50 max-w-[9rem] truncate border-2 px-3 py-2 text-xs font-bold uppercase tracking-widest"
+      style={{ borderColor: "rgba(255,243,230,.3)", background: "rgba(20,10,25,.55)", color: profile.color }}>
+      {profile.name}
     </button>
   );
 }
@@ -2848,7 +2971,7 @@ function Host({ onExit }) {
   const pub = (ps) => ps.map((p) => ({
     id: p.id, name: p.name, color: p.color, score: p.score, team: p.team ?? null,
     teamName: p.team != null ? tn(p.team) : null,
-    flags: p.flags ?? 0, lastConfessione: p.lastConfessione || null, lastHotseat: p.lastHotseat || null, votedAgainst: p.votedAgainst || null,
+    flags: p.flags ?? 0, lastHotseat: p.lastHotseat || null, votedAgainst: p.votedAgainst || null,
   }));
   const totQ = () => flowRef.current.reduce((s, b) => s + b.n, 0);
   const doneQ = () => flowRef.current.slice(0, posRef.current.b).reduce((s, b) => s + b.n, 0) + posRef.current.q;
@@ -2869,10 +2992,15 @@ function Host({ onExit }) {
               const ex = ps.find((p) => p.id === id);
               if (!ex) {
                 if (ps.length >= 10) return ps;
-                return [...ps, { id, name: (d.name || "Anonimo").slice(0, 12), color: PCOL[ps.length % PCOL.length], score: 0, right: 0, wrong: 0, risk: 0, flags: 0, passiConf: 0, passiHot: 0, votedFor: 0, sceltaMancate: 0, team: d.team || null, teamName: d.teamName || null }];
+                // il colore è scelto liberamente dal giocatore (vedi Player):
+                // due persone con lo stesso colore in stanza non è un problema.
+                const color = d.color || PCOL[ps.length % PCOL.length];
+                return [...ps, { id, name: (d.name || "Anonimo").slice(0, 12), color, score: 0, right: 0, wrong: 0, risk: 0, flags: 0, passiHot: 0, votedFor: 0, sceltaMancate: 0, team: d.team || null, teamName: d.teamName || null }];
               }
-              if ((d.team || null) !== ex.team || (d.teamName || null) !== ex.teamName)
-                return ps.map((p) => (p.id === id ? { ...p, team: d.team || null, teamName: d.teamName || null } : p));
+              const newName = (d.name || ex.name || "Anonimo").slice(0, 12);
+              const newColor = d.color || ex.color;
+              if ((d.team || null) !== ex.team || (d.teamName || null) !== ex.teamName || newName !== ex.name || newColor !== ex.color)
+                return ps.map((p) => (p.id === id ? { ...p, team: d.team || null, teamName: d.teamName || null, name: newName, color: newColor } : p));
               return ps;
             });
           } catch (_) {}
@@ -3165,19 +3293,18 @@ function Host({ onExit }) {
     return pickQuestion(key, arr, { keyOf: keyf, difficultyOf: (x) => x.lv, session: sessionRef.current }).item;
   }
 
-  /** Una Confessione e un Hot Seat a testa (mai lo stesso bersaglio due
-   *  volte), più Scelta/Chi-è-la-Red-Flag/Caos a riempire, tutto mescolato. */
+  /** Un Hot Seat e un Bluff a testa (mai lo stesso bersaglio due volte),
+   *  più tante carte di voto segreto sul gruppo — il cuore del gioco —
+   *  e qualche Scelta a riempire, tutto mescolato. */
   function buildRfFlow(ps) {
-    const confessione = shuffle(ps).map((p) => ({ kind: "confessione", pid: p.id }));
     const hotseat = shuffle(ps).map((p) => ({ kind: "hotseat", pid: p.id }));
     const bluff = shuffle(ps).map((p) => ({ kind: "bluff", pid: p.id }));
-    const extra = Math.max(2, Math.ceil(ps.length / 2));
-    const scelta = Array.from({ length: extra }, () => ({ kind: "scelta" }));
-    const votoRf = Array.from({ length: extra }, () => ({ kind: "vote", variant: "redflag" }));
-    const votoCrush = Array.from({ length: extra }, () => ({ kind: "vote", variant: "crush" }));
-    const caosN = Math.max(1, Math.ceil(ps.length / 3));
-    const caos = Array.from({ length: caosN }, () => ({ kind: "vote", variant: "caos" }));
-    return shuffle([...confessione, ...hotseat, ...bluff, ...scelta, ...votoRf, ...votoCrush, ...caos]);
+    const scelta = Array.from({ length: Math.max(2, Math.ceil(ps.length / 2)) }, () => ({ kind: "scelta" }));
+    const voteN = Math.max(3, ps.length);
+    const votoRf = Array.from({ length: voteN }, () => ({ kind: "vote", variant: "redflag" }));
+    const votoCrush = Array.from({ length: voteN }, () => ({ kind: "vote", variant: "crush" }));
+    const caos = Array.from({ length: Math.max(2, Math.ceil(ps.length / 2)) }, () => ({ kind: "vote", variant: "caos" }));
+    return shuffle([...hotseat, ...bluff, ...scelta, ...votoRf, ...votoCrush, ...caos]);
   }
 
   function startRedFlag() {
@@ -3205,10 +3332,6 @@ function Host({ onExit }) {
     if (item.kind === "scelta") {
       const card = pickRf("rfScelta", RF_SCELTA.filter((x) => x.lv <= lv), (x) => x.q);
       state = { mode: "redflag", phase: "rf-scelta", rid, card, time: RF_SCELTA_T, qn, qtot, level: lv };
-    } else if (item.kind === "confessione") {
-      const target = playersRef.current.find((p) => p.id === item.pid);
-      const card = pickRf("rfConf", RF_CONFESSIONE.filter((x) => x.lv <= lv), (x) => x.q);
-      state = { mode: "redflag", phase: "rf-confessione", rid, target: item.pid, targetName: target?.name, card, time: RF_CONF_T, qn, qtot, level: lv };
     } else if (item.kind === "hotseat") {
       const target = playersRef.current.find((p) => p.id === item.pid);
       const card = pickRf("rfHotseat", RF_HOTSEAT.filter((x) => x.lv <= lv), (x) => x.q);
@@ -3227,7 +3350,6 @@ function Host({ onExit }) {
     setLeft(state.time);
     await push({ ...state, players: pub(playersRef.current), room });
     const rfNarration = item.kind === "scelta" ? "Scelta di gruppo. Rispondete tutti dal telefono: chi non sceglie in tempo prende una bandiera."
-      : item.kind === "confessione" ? `Confessionale per ${state.targetName}. Rispondi a voce o passa dal telefono.`
       : item.kind === "hotseat" ? `Hot Seat per ${state.targetName}. Il gruppo lo mette sotto torchio a voce.`
       : item.kind === "bluff" ? `Bluff per ${state.targetName}. Sceglie in segreto se dire la verità o inventare, poi la scrive sul telefono.`
       : item.variant === "caos" ? "Caos. Votate in segreto chi si merita questa carta."
@@ -3257,22 +3379,6 @@ function Host({ onExit }) {
         setPlayers(updated);
         setRf({ ...cur, phase: "rf-sceltares", tally, missing });
         await push({ mode: "redflag", phase: "rf-sceltares", rid: cur.rid, card: cur.card, tally, missing, res, qn: cur.qn, qtot: cur.qtot, players: pub(updated), room });
-        ansRef.current = {}; setAnswered({});
-        return;
-      }
-
-      if (cur.phase === "rf-confessione") {
-        const d = ansRef.current[cur.target];
-        const passed = !d || d.choice === "pass";
-        const gain = passed ? 1 : 0;
-        const updated = ps.map((p) => (p.id === cur.target ? {
-          ...p, flags: (p.flags || 0) + gain, passiConf: (p.passiConf || 0) + (passed ? 1 : 0),
-          lastConfessione: { q: cur.card.q, confessed: !passed },
-        } : p));
-        res[cur.target] = { flag: gain, note: passed ? "Ha passato: bandiera." : "Ha confessato." };
-        setPlayers(updated);
-        setRf({ ...cur, phase: "rf-confres", passed });
-        await push({ mode: "redflag", phase: "rf-confres", rid: cur.rid, target: cur.target, targetName: cur.targetName, card: cur.card, passed, res, qn: cur.qn, qtot: cur.qtot, players: pub(updated), room });
         ansRef.current = {}; setAnswered({});
         return;
       }
@@ -3391,7 +3497,7 @@ function Host({ onExit }) {
   async function endRedFlag() {
     const ps = playersRef.current;
     const rank = [...ps].sort((a, b) => (a.flags || 0) - (b.flags || 0));
-    const statFor = (p) => ({ id: p.id, flags: p.flags || 0, votedFor: p.votedFor || 0, passiConf: p.passiConf || 0, passiHot: p.passiHot || 0, sceltaMancate: p.sceltaMancate || 0, bluffBeccato: p.bluffBeccato || 0 });
+    const statFor = (p) => ({ id: p.id, flags: p.flags || 0, votedFor: p.votedFor || 0, passiHot: p.passiHot || 0, sceltaMancate: p.sceltaMancate || 0, bluffBeccato: p.bluffBeccato || 0 });
     const stats = ps.map(statFor);
     const titles = RF_TITLES.map((t) => {
       const w = t.pick(stats);
@@ -3405,7 +3511,7 @@ function Host({ onExit }) {
   /* timer Red Flag */
   useEffect(() => {
     if (!rf) return;
-    const timed = ["rf-scelta", "rf-confessione", "rf-vote", "rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"];
+    const timed = ["rf-scelta", "rf-vote", "rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"];
     if (!timed.includes(rf.phase)) return;
     if (left <= 0) {
       // come per il Quiz Classico: un'ultima scansione prima di chiudere la fase,
@@ -3428,7 +3534,7 @@ function Host({ onExit }) {
       const cur = rfRef.current;
       if (!cur) return;
 
-      if (["rf-sceltares", "rf-confres", "rf-voteres", "rf-hotseatres", "rf-bluffres"].includes(cur.phase)) {
+      if (["rf-sceltares", "rf-voteres", "rf-hotseatres", "rf-bluffres"].includes(cur.phase)) {
         await Promise.all(playersRef.current.map(async (p) => {
           if (ansRef.current[p.id]) return;
           try {
@@ -3459,19 +3565,6 @@ function Host({ onExit }) {
           } catch (_) {}
         }));
         if (playersRef.current.length && playersRef.current.every((p) => ansRef.current[p.id])) resolveRf();
-        return;
-      }
-
-      if (cur.phase === "rf-confessione") {
-        try {
-          const r = await storage.get(kPlayer(room, cur.target), true);
-          const d = JSON.parse(r.value);
-          if (d.rid === cur.rid && (d.rfConf === "confess" || d.rfConf === "pass") && !ansRef.current[cur.target]) {
-            ansRef.current[cur.target] = { choice: d.rfConf };
-            setAnswered({ [cur.target]: true });
-            resolveRf();
-          }
-        } catch (_) {}
         return;
       }
 
@@ -4204,7 +4297,7 @@ function Host({ onExit }) {
 
   if (screen === "rf-game")
     return <HostRedFlag {...{ rf, left, players, answered, next: nextRf, room, err, rfLevel, narrating }} onRaiseLevel={raiseRfLevel} onExit={onExit} onAgain={() => {
-      const reset = players.map((p) => ({ ...p, flags: 0, passiConf: 0, passiHot: 0, votedFor: 0, sceltaMancate: 0, lastConfessione: null, lastHotseat: null, votedAgainst: null }));
+      const reset = players.map((p) => ({ ...p, flags: 0, passiHot: 0, votedFor: 0, sceltaMancate: 0, lastHotseat: null, votedAgainst: null }));
       setPlayers(reset);
       playersRef.current = reset;
       startRedFlag();
@@ -4234,7 +4327,7 @@ function HostSetup({ partyType, setPartyType, mode, setMode, diff, setDiff, team
       <button onClick={() => setPartyType("redflag")} className="press border-2 p-5 text-left"
         style={{ borderColor: C.flagRed, background: partyType === "redflag" ? C.flagRed : "transparent", color: partyType === "redflag" ? C.cream : C.flagRed, boxShadow: partyType === "redflag" ? `5px 5px 0 ${C.ink2}` : "none" }}>
         <p className="text-3xl uppercase" style={display}><span className="flag-wave inline-block">🚩</span> Red Flag</p>
-        <p className="mt-1 text-xs font-bold" style={{ opacity: partyType === "redflag" ? 0.85 : 0.75 }}>Scelte, confessioni, voti e Hot Seat. Vince chi ha meno bandiere.</p>
+        <p className="mt-1 text-xs font-bold" style={{ opacity: partyType === "redflag" ? 0.85 : 0.75 }}>Scelte, voti segreti, Hot Seat e Bluff. Vince chi ha meno bandiere.</p>
       </button>
     </div>
   );
@@ -4242,10 +4335,9 @@ function HostSetup({ partyType, setPartyType, mode, setMode, diff, setDiff, team
   if (partyType === "redflag") {
     const cats = [
       ["Scelta", "Due opzioni orribili, si sceglie dal telefono. Non scegliere = una bandiera."],
-      ["Confessione", "Una domanda solo a te. Rispondi, o «Passo» e ti prendi la bandiera."],
       ["Chi è la Red Flag", "Voto segreto su un membro del gruppo. Chi vince la votazione incassa una bandiera."],
-      ["Hot Seat", "30 secondi sotto tiro. 3 pass gratis, poi ogni pass è una bandiera. Alla fine si vota: assolto o red flag."],
-      ["Bluff", "Rispondi a voce, deciso in segreto: verità o bugia? Il gruppo vota se ci ha creduto. Beccato = bandiera."],
+      ["Hot Seat", "Sotto torchio. 3 pass gratis, poi ogni pass è una bandiera. Alla fine si vota: assolto o red flag."],
+      ["Bluff", "Scegli in segreto se dire la verità o inventare, poi scrivilo sul telefono. Il gruppo vota se ci ha creduto. Beccato = bandiera."],
       ["Crush", "Come Chi è la Red Flag, ma sul tema cotte e attrazione nel gruppo."],
       ["Caos", "Carta pescata a caso, tutti votano insieme: nessuno è al sicuro."],
     ];
@@ -4256,7 +4348,7 @@ function HostSetup({ partyType, setPartyType, mode, setMode, diff, setDiff, team
         {typePicker}
         <div className="border-2 p-6" style={{ borderColor: C.flagRed, background: "rgba(255,31,61,.06)" }}>
           <p className="text-6xl uppercase" style={{ ...display, color: C.flagRed }}><span className="flag-wave inline-block">🚩</span> Red Flag</p>
-          <p className="mt-2 text-sm opacity-80">Il gruppo vota, giudica e si confessa a vicenda. Niente risposte giuste: solo bandiere. Vince chi ne prende meno.</p>
+          <p className="mt-2 text-sm opacity-80">Il gruppo vota e giudica a vicenda. Niente risposte giuste: solo bandiere. Vince chi ne prende meno.</p>
 
           <h3 className="mt-6 text-xl uppercase" style={display}>Intensità</h3>
           <p className="mb-2 text-xs opacity-70">Si può solo alzare, mai abbassare — anche a partita in corso.</p>
@@ -4421,7 +4513,7 @@ function HostLobby({ room, players, canStart, onStart, err, M, D, T, teamMode, t
     <div className="tvin mx-auto max-w-4xl px-6 py-10">
       <p className="text-xs font-bold uppercase tracking-widest" style={{ color: isRf ? C.flagRed : C.lime }}>
         {isRf
-          ? "Stanza aperta · 🚩 red flag · scelte, confessioni, voti e hot seat · vince chi ha meno bandiere"
+          ? "Stanza aperta · 🚩 red flag · scelte, voti, hot seat e bluff · vince chi ha meno bandiere"
           : `Stanza aperta · ${M.label.toLowerCase()} · livello ${D.label.toLowerCase()} · ${T}s a domanda · ${teamMode === "squadre" ? (teamsList.length === 0 ? "nessuna squadra fondata" : teamsList.length === 1 ? "1 squadra fondata" : `${teamsList.length} squadre fondate`) : "una squadra a testa"} · ${M.own} domande per squadra + ${M.mgs} minigiochi`}
       </p>
       <div className="mt-2 flex flex-wrap items-end gap-6">
@@ -5100,10 +5192,9 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, na
     if (seenRef.current.key === key) return;
     seenRef.current.key = key;
     if (["rf-scelta", "rf-vote"].includes(rf.phase)) sfx.whoosh();
-    else if (rf.phase === "rf-confessione" || rf.phase === "rf-hotseat" || rf.phase === "rf-bluff") { sfx.whoosh(); sfx.rfPulse(); }
+    else if (rf.phase === "rf-hotseat" || rf.phase === "rf-bluff") { sfx.whoosh(); sfx.rfPulse(); }
     else if (rf.phase === "rf-hotseatvote" || rf.phase === "rf-bluffvote") sfx.whoosh();
     else if (rf.phase === "rf-sceltares" || rf.phase === "rf-voteres") sfx.reveal();
-    else if (rf.phase === "rf-confres") (rf.passed ? sfx.rfGuilty() : sfx.rfInnocent());
     else if (rf.phase === "rf-hotseatres") {
       sfx.rfDrumroll();
       setTimeout(() => (rf.verdict === "redflag" ? sfx.rfGuilty() : sfx.rfInnocent()), 1350);
@@ -5117,7 +5208,7 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, na
 
   /* battito di tensione negli ultimi secondi */
   useEffect(() => {
-    if (!rf || !["rf-confessione", "rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"].includes(rf.phase)) return;
+    if (!rf || !["rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"].includes(rf.phase)) return;
     const secs = Math.ceil(left);
     if (secs === seenRef.current.tickAt) return;
     seenRef.current.tickAt = secs;
@@ -5126,7 +5217,7 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, na
 
   if (!rf) return null;
   const goNext = () => { sfx.select(); next(); };
-  const timed = ["rf-scelta", "rf-confessione", "rf-vote", "rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"].includes(rf.phase);
+  const timed = ["rf-scelta", "rf-vote", "rf-hotseat", "rf-hotseatvote", "rf-bluff", "rf-bluffvote"].includes(rf.phase);
   const voters = rf.phase === "rf-hotseatvote" || rf.phase === "rf-bluffvote" ? Math.max(1, players.length - 1) : players.length;
   const lowTime = timed && left < 5;
 
@@ -5191,30 +5282,6 @@ function HostRedFlag({ rf, left, players, answered, next, room, err, rfLevel, na
         </div>
       )}
 
-      {rf.phase === "rf-confessione" && (
-        <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
-          <span className="pop -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: C.flagRed, color: C.cream }}>Confessionale</span>
-          <p className="pop glow my-4 text-6xl uppercase" style={{ ...display, color: C.flagRed }}>{rf.targetName}</p>
-          <Presenter talking={narrating} color={C.flagRed} size={80} />
-          <p className="mt-4 max-w-2xl text-2xl font-bold" style={display}>{rf.card?.q}</p>
-          <p className="mt-4 max-w-xl text-lg opacity-70">Sta rispondendo dal suo telefono. Rispondere o passare: chi passa si prende una bandiera.</p>
-        </div>
-      )}
-
-      {rf.phase === "rf-confres" && (
-        <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
-          <p className="text-xs uppercase tracking-widest opacity-60">Confessionale</p>
-          <p className="text-4xl uppercase" style={{ ...display, color: C.cream }}>{rf.targetName}</p>
-          <p className="mt-2 max-w-xl text-sm opacity-60">{rf.card?.q}</p>
-          <div className={`stamp-in mt-6 inline-block -rotate-1 border-4 px-10 py-5 ${rf.passed ? "" : ""}`} style={{ borderColor: rf.passed ? C.flagRed : C.lime, color: rf.passed ? C.flagRed : C.lime }}>
-            <p className="text-5xl uppercase" style={display}>{rf.passed ? "Passo · 🚩" : "Confessato"}</p>
-          </div>
-          <p className="mt-6 text-center text-sm opacity-60">{Object.keys(answered).length}/{voters} pronti per continuare</p>
-          <button onClick={goNext} className="press mt-2 w-full max-w-xl py-5 text-3xl uppercase" style={{ ...display, background: C.flagRed, color: C.cream, boxShadow: `6px 6px 0 ${C.ink2}` }}>
-            {rf.qn >= rf.qtot ? "Verdetto finale" : "Avanti"}
-          </button>
-        </div>
-      )}
 
       {rf.phase === "rf-vote" && (
         <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
@@ -5660,18 +5727,11 @@ function MusicRound({ s, write }) {
 /* ============================================================
    PLAYER
    ============================================================ */
-function Player({ onExit }) {
-  const [id] = useState(() => {
-    try {
-      const saved = sessionStorage.getItem("cultrash:pid");
-      if (saved) return saved;
-      const fresh = uid();
-      sessionStorage.setItem("cultrash:pid", fresh);
-      return fresh;
-    } catch (_) { return uid(); }
-  });
-  const [room, setRoom] = useState("");
-  const [name, setName] = useState("");
+function Player({ onExit, profile }) {
+  const id = profile.id;
+  const [room, setRoom] = useState(profile.room || "");
+  const [name, setName] = useState(profile.name || "");
+  const [color, setColor] = useState(profile.color || PCOL[0]);
   const [joined, setJoined] = useState(false);
   const [s, setS] = useState(null);
   const [answer, setAnswer] = useState(null);
@@ -5721,7 +5781,7 @@ function Player({ onExit }) {
         const st = JSON.parse(r.value);
         setS(st);
         setMsg("");
-        if ((st.phase === "quiz" || st.phase === "vote" || st.phase === "choose" || st.phase === "spicy" || st.phase === "bet" || st.phase === "rf-scelta" || st.phase === "rf-confessione" || st.phase === "rf-vote" || st.phase === "rf-hotseat" || st.phase === "rf-hotseatvote" || st.phase === "rf-bluff" || st.phase === "rf-bluffvote") && st.rid !== ridRef.current) {
+        if ((st.phase === "quiz" || st.phase === "vote" || st.phase === "choose" || st.phase === "spicy" || st.phase === "bet" || st.phase === "rf-scelta" || st.phase === "rf-vote" || st.phase === "rf-hotseat" || st.phase === "rf-hotseatvote" || st.phase === "rf-bluff" || st.phase === "rf-bluffvote") && st.rid !== ridRef.current) {
           ridRef.current = st.rid;
           startRef.current = Date.now();
           setAnswer(null); setRisk(false); setNumGuess(""); setClueStep(0); setPendAns(null); setReady(false); setHotPasses(0); setBluffText(""); setBluffSent(false); setHotQ("");
@@ -5734,6 +5794,12 @@ function Player({ onExit }) {
     return () => { stop = true; clearInterval(t); };
   }, [joined, room]);
 
+  /* nome e colore restano modificabili in ogni momento prima di entrare:
+   * si salvano da soli a ogni modifica, così al prossimo accesso (anche
+   * dopo aver chiuso la scheda) sono già pronti, ma non sono mai bloccati. */
+  useEffect(() => { saveProfile({ name, color }); }, [name, color]);
+
+
   async function join() {
     const r = room.trim().toUpperCase();
     if (r.length !== 4 || !name.trim()) return;
@@ -5742,7 +5808,9 @@ function Player({ onExit }) {
     try {
       let prev = {};
       try { const pr = await storage.get(kPlayer(r, id), true); prev = JSON.parse(pr.value) || {}; } catch (_) {}
-      await storage.set(kPlayer(r, id), JSON.stringify({ ...prev, id, name: name.trim().slice(0, 12), joined: Date.now() }), true);
+      const trimmedName = name.trim().slice(0, 12);
+      await storage.set(kPlayer(r, id), JSON.stringify({ ...prev, id, name: trimmedName, color, joined: Date.now() }), true);
+      saveProfile({ name: trimmedName, color, room: r });
       setRoom(r); setJoined(true);
     } catch (_) { setMsg("Non riesco a entrare. Riprova tra un secondo."); }
   }
@@ -5799,12 +5867,6 @@ function Player({ onExit }) {
     if (answer !== null || s?.phase !== "rf-scelta") return;
     setAnswer(k);
     const ok = await write({ rid: s.rid, rfChoice: k });
-    if (!ok) setAnswer(null);
-  }
-  async function sendRfConf(choice) {
-    if (answer !== null || s?.phase !== "rf-confessione") return;
-    setAnswer(choice);
-    const ok = await write({ rid: s.rid, rfConf: choice });
     if (!ok) setAnswer(null);
   }
   async function sendRfVote(pid) {
@@ -5872,8 +5934,21 @@ function Player({ onExit }) {
         <input value={room} onChange={(e) => setRoom(e.target.value.toUpperCase().slice(0, 4))} placeholder="CODICE"
           className="w-full border-2 bg-transparent px-4 py-4 text-center text-5xl font-bold tracking-widest"
           style={{ borderColor: C.gold, color: C.gold }} inputMode="text" autoCapitalize="characters" />
+        {profile.room && room === profile.room && (
+          <p className="mt-2 text-xs opacity-60">Stanza dell'ultima volta: tocca «Sono pronto» per riconnetterti, o cambia i dati qui sotto.</p>
+        )}
         <input value={name} onChange={(e) => setName(e.target.value.slice(0, 12))} placeholder="Il tuo nome"
           className="mt-3 w-full border-2 bg-transparent px-4 py-3 text-xl font-bold" style={{ borderColor: "rgba(255,243,230,.3)", color: C.cream }} />
+        <p className="mb-2 mt-4 text-xs font-bold uppercase tracking-widest opacity-60">Il tuo colore</p>
+        <div className="flex flex-wrap gap-2">
+          {PCOL.map((c) => {
+            return (
+              <button key={c} type="button" onClick={() => setColor(c)}
+                className="press h-10 w-10 border-2" aria-label={c}
+                style={{ background: c, borderColor: color === c ? C.cream : "transparent" }} />
+            );
+          })}
+        </div>
         <button onClick={join} className="press mt-6 w-full py-5 text-3xl uppercase" style={{ ...display, background: C.magenta, color: C.cream, boxShadow: `6px 6px 0 ${C.lime}` }}>Sono pronto</button>
         {msg && <p className="mt-4 text-center text-sm" style={{ color: C.gold }}>{msg}</p>}
       </div>
@@ -6331,48 +6406,6 @@ function Player({ onExit }) {
         </div>
       )}
 
-      {s?.phase === "rf-confessione" && (
-        s.target === id ? (
-          <div className="tvin flex flex-1 flex-col">
-            <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: C.flagRed, color: C.cream }}>🫣 Confessionale</span>
-            <p className="mb-4 text-lg font-bold leading-snug">{s.card?.q}</p>
-            <div className="flex flex-1 flex-col gap-3">
-              <button onClick={() => sendRfConf("confess")} disabled={answer !== null}
-                className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${answer === "confess" ? "bump" : ""}`}
-                style={{ background: answer === "confess" ? C.cream : C.lime, color: C.ink, opacity: answer !== null && answer !== "confess" ? 0.25 : 1, boxShadow: answer !== null ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
-                Confesso
-              </button>
-              <button onClick={() => sendRfConf("pass")} disabled={answer !== null}
-                className={`press flex flex-1 items-center justify-center px-4 py-6 text-center text-xl font-bold ${answer === "pass" ? "bump" : ""}`}
-                style={{ background: answer === "pass" ? C.cream : C.flagRed, color: C.cream, opacity: answer !== null && answer !== "pass" ? 0.25 : 1, boxShadow: answer !== null ? "none" : "5px 5px 0 rgba(0,0,0,.45)" }}>
-                Passo 🚩
-              </button>
-            </div>
-            {answer && <p className="mt-2 text-center text-sm opacity-70">Detto. Ora tocca a te dirlo al gruppo.</p>}
-          </div>
-        ) : (
-          <div className="tvin flex flex-1 flex-col items-center justify-center text-center">
-            <span className="mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: "rgba(255,31,61,.15)", color: C.flagRed }}>🫣 Confessionale</span>
-            <p className="text-2xl font-bold" style={{ color: C.flagRed }}>{s.targetName}</p>
-            <p className="mt-2 max-w-xs text-sm opacity-70">Sta rispondendo sul suo telefono. Guarda lo schermo grande.</p>
-          </div>
-        )
-      )}
-
-      {s?.phase === "rf-confres" && (
-        <div key={s.rid} className="tvin flex flex-1 flex-col justify-center text-center">
-          <p className="text-xs uppercase tracking-widest opacity-60">{s.targetName}</p>
-          <p className="my-2 text-3xl uppercase" style={{ ...display, color: s.passed ? C.flagRed : C.lime }}>{s.passed ? "Passo · 🚩" : "Confessato"}</p>
-          {s.target === id && mine && (
-            <p className="mt-2 text-sm font-bold" style={{ color: mine.flag ? C.flagRed : C.lime }}>{mine.note}</p>
-          )}
-          <button onClick={sendReady} disabled={ready} className="press mt-6 w-full py-4 text-xl uppercase"
-            style={{ ...display, background: ready ? "rgba(255,243,230,.12)" : C.flagRed, color: ready ? "rgba(255,243,230,.5)" : C.cream }}>
-            {ready ? "Aspettando gli altri…" : "Avanti"}
-          </button>
-        </div>
-      )}
-
       {s?.phase === "rf-vote" && (
         <div className="tvin flex flex-1 flex-col">
           <span className="buzzer-hot mb-3 inline-flex w-fit items-center gap-1 -rotate-1 px-3 py-1 text-xs font-bold uppercase" style={{ background: s.variant === "crush" ? C.magenta : C.flagRed, color: C.cream }}>
@@ -6579,7 +6612,6 @@ function Player({ onExit }) {
         const pos = rank.findIndex((p) => p.id === id) + 1;
         const won = (s.titles || []).filter((t) => t.winnerId === id);
         const moments = [];
-        if (me?.lastConfessione) moments.push(`«${me.lastConfessione.q}» — ${me.lastConfessione.confessed ? "hai confessato" : "hai passato"}.`);
         if (me?.lastHotseat) moments.push(`Hot Seat: verdetto ${me.lastHotseat.verdict === "redflag" ? "Red Flag" : "assolto"}, ${me.lastHotseat.passes} pass.`);
         if (me?.lastBluff) moments.push(`«${me.lastBluff.q}» — ${me.lastBluff.choice === "bluff" ? "hai bluffato" : "hai detto la verità"}, ${me.lastBluff.caught ? "e ti hanno beccato" : "e te la sei cavata"}.`);
         if (me?.votedAgainst) moments.push(`«${me.votedAgainst.q}» — ${me.votedAgainst.votes} voti contro di te.`);

@@ -54,8 +54,8 @@ export const appwriteStorage = {
     return { key, value: doc.value, shared: true };
   },
 
-  async set(key, value) {
-    const expiresAt = new Date(Date.now() + TTL_MS).toISOString();
+  async set(key, value, shared, ttlMs = TTL_MS) {
+    const expiresAt = new Date(Date.now() + ttlMs).toISOString();
     await databases.upsertDocument(DB, COLLECTION, docId(key), { key, value, expiresAt });
     return { key, value, shared: true };
   },
