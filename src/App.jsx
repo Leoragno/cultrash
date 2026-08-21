@@ -2923,6 +2923,10 @@ function Host({ onExit }) {
   const cats = Object.keys(enabled).filter((k) => enabled[k]);
 
   const playersRef = useRef(players), gRef = useRef(g), rfRef = useRef(rf), ansRef = useRef({}), usedRef = useRef(loadUsed());
+  /** Chi ha già chiesto "ancora 20 secondi" in Indovina la Canzone/Sigla: gli
+   *  altri 20 secondi partono solo quando OGNI giocatore ha scelto qualcosa
+   *  (risposto, passato o chiesto più tempo), mai al primo che lo chiede. */
+  const extendReqRef = useRef({});
   /** Stato della partita in corso per il Question Engine: quali domande sono
    *  già uscite in questa serata (mai due volte, in nessun minigioco) e
    *  quante per categoria/difficoltà (per non concentrarle). Si azzera a ogni
@@ -3128,7 +3132,6 @@ function Host({ onExit }) {
         return;
       }
       if (cur.phase === "music") {
-        let wantExtend = false;
         await Promise.all(playersRef.current.map(async (p) => {
           if (ansRef.current[p.id]) return;
           try {
@@ -3142,11 +3145,16 @@ function Host({ onExit }) {
               ansRef.current[p.id] = { title: d.title || "", artist: d.artist || "" };
               setAnswered((a) => ({ ...a, [p.id]: true }));
             } else if (d.extend) {
-              wantExtend = true;
+              extendReqRef.current[p.id] = true;
             }
           } catch (_) {}
         }));
-        if (wantExtend && !cur.extended) {
+        // I 20 secondi extra partono solo quando OGNI giocatore ha scelto
+        // qualcosa (risposto, passato o chiesto più tempo): mai al primo che
+        // lo chiede, altrimenti riparte mentre qualcun altro sta ancora decidendo.
+        const tuttiHannoScelto = playersRef.current.length > 0
+          && playersRef.current.every((p) => ansRef.current[p.id] || extendReqRef.current[p.id]);
+        if (tuttiHannoScelto && !cur.extended && Object.keys(extendReqRef.current).length > 0) {
           const nextState = { ...cur, extended: true };
           setG(nextState);
           await push({ ...nextState, players: pub(playersRef.current), room });
@@ -3769,6 +3777,7 @@ function Host({ onExit }) {
     posRef.current = { b: bi, q: qi };
     const b = flowRef.current[bi];
     ansRef.current = {};
+    extendReqRef.current = {};
     setAnswered({});
     setOutcome(null);
     const rid = `${bi}-${qi}`;
