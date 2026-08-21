@@ -2979,8 +2979,10 @@ function Host({ onExit }) {
   /* lobby */
   useEffect(() => {
     if (screen !== "lobby") return;
-    let stop = false;
+    let stop = false, inCorso = false;
     const scan = async () => {
+      if (inCorso) return; // la rete lenta non deve accodare più scan in parallelo
+      inCorso = true;
       try {
         const res = await storage.list(pPrefix(room), true);
         await Promise.all((res?.keys || []).map((k) => k.split(":").pop()).map(async (id) => {
@@ -3006,6 +3008,7 @@ function Host({ onExit }) {
           } catch (_) {}
         }));
       } catch (_) {}
+      finally { inCorso = false; }
     };
     scan();
     const t = setInterval(scan, POLL_HOST);
@@ -4278,7 +4281,7 @@ function Host({ onExit }) {
   async function endMatch() {
     const rank = [...playersRef.current].sort((a, b) => b.score - a.score);
     setScreen("podio");
-    await push({ phase: "podio", players: pub(rank), room });
+    await push({ phase: "podio", players: pub(rank), room, teamMode, teams: teamsList });
   }
 
   const teamCounts = teamsList.map((t) => players.filter((p) => p.team === t.i).length);
@@ -5084,7 +5087,7 @@ function HostPodio({ rank, teamMode, teamsList, onAgain, onExit }) {
   if (teamMode === "squadre") {
     const tot = {};
     rank.forEach((p) => { if (p.team != null) tot[p.team] = (tot[p.team] || 0) + p.score; });
-    const tRank = Object.keys(tot).map(Number).sort((a, b) => tot[b] - tot[a]);
+    const tRank = Object.keys(tot).sort((a, b) => tot[b] - tot[a]);
     const winT = tRank[0];
     return (
       <div className="tvin mx-auto max-w-3xl px-6 py-10">
@@ -5773,8 +5776,10 @@ function Player({ onExit, profile }) {
 
   useEffect(() => {
     if (!joined) return;
-    let stop = false;
+    let stop = false, inCorso = false;
     const tick = async () => {
+      if (inCorso) return; // la rete lenta non deve accodare più tick in parallelo
+      inCorso = true;
       try {
         const r = await storage.get(kState(room), true);
         if (stop) return;
@@ -5788,6 +5793,7 @@ function Player({ onExit, profile }) {
           if (st.phase !== "choose") { setBar(100); setTimeout(() => !stop && setBar(0), 60); }
         }
       } catch (_) { setMsg("Sto ricollegando..."); }
+      finally { inCorso = false; }
     };
     tick();
     const t = setInterval(tick, POLL_PLAYER);
@@ -6343,7 +6349,22 @@ function Player({ onExit, profile }) {
       {s?.phase === "podio" && (
         <div className="tvin flex flex-1 flex-col justify-center">
           <p className="text-center text-xs uppercase tracking-widest opacity-60">Classifica finale</p>
-          {s.players.map((p, i) => (
+          {s.teamMode === "squadre" ? (() => {
+            const tMeta = (tid) => (s.teams || []).find((t) => t.i === tid) || { name: "Squadra", color: C.cream };
+            const tot = {};
+            s.players.forEach((p) => { if (p.team != null) tot[p.team] = (tot[p.team] || 0) + p.score; });
+            const tRank = Object.keys(tot).sort((a, b) => tot[b] - tot[a]);
+            return tRank.map((ti, i) => (
+              <div key={ti} className={`rise-in mt-2 border-2 px-3 py-3 ${s.players.some((p) => p.id === id && p.team === ti) ? "glow" : ""}`} style={{ borderColor: tMeta(ti).color, animationDelay: `${i * 0.08}s` }}>
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl" style={{ ...display, color: tMeta(ti).color }}>{i + 1}</span>
+                  <span className="flex-1 text-lg font-bold uppercase" style={display}>{tMeta(ti).name}</span>
+                  <span className="font-bold">{tot[ti]}</span>
+                </div>
+                <p className="mt-1 pl-9 text-xs opacity-70">{s.players.filter((p) => p.team === ti).map((p) => p.name).join(" · ")}</p>
+              </div>
+            ));
+          })() : s.players.map((p, i) => (
             <div key={p.id} className={`rise-in mt-2 flex items-center gap-3 border-2 px-3 py-3 ${p.id === id ? "glow" : ""}`} style={{ borderColor: p.id === id ? p.color : "rgba(255,243,230,.15)", animationDelay: `${i * 0.08}s` }}>
               <span className="text-2xl" style={{ ...display, color: p.color }}>{i + 1}</span>
               <span className="flex-1 font-bold">

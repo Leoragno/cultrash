@@ -10,15 +10,23 @@
  * è la stessa e non serve configurare nulla.
  */
 
+import { conRitentativi } from "./retry";
+
 const BASE = import.meta.env.VITE_API_URL || "/api";
 
 async function chiama(path, opts = {}) {
-  const r = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
+  return conRitentativi(async () => {
+    const r = await fetch(`${BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      ...opts,
+    });
+    if (!r.ok) {
+      const e = new Error(`sync ${r.status}`);
+      e.code = r.status;
+      throw e;
+    }
+    return r.json();
   });
-  if (!r.ok) throw new Error(`sync ${r.status}`);
-  return r.json();
 }
 
 export const restStorage = {

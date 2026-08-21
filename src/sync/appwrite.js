@@ -18,6 +18,7 @@
  */
 
 import { Client, Databases, Query } from "appwrite";
+import { conRitentativi } from "./retry";
 
 const TTL_MS = 1000 * 60 * 60 * 6; // una stanza scade dopo sei ore, come il vecchio server
 
@@ -49,27 +50,27 @@ export const appwriteStorage = {
   available: Boolean(import.meta.env.VITE_APPWRITE_PROJECT_ID),
 
   async get(key) {
-    const doc = await databases.getDocument(DB, COLLECTION, docId(key));
+    const doc = await conRitentativi(() => databases.getDocument(DB, COLLECTION, docId(key)));
     if (scaduto(doc)) throw new Error("chiave assente");
     return { key, value: doc.value, shared: true };
   },
 
   async set(key, value, shared, ttlMs = TTL_MS) {
     const expiresAt = new Date(Date.now() + ttlMs).toISOString();
-    await databases.upsertDocument(DB, COLLECTION, docId(key), { key, value, expiresAt });
+    await conRitentativi(() => databases.upsertDocument(DB, COLLECTION, docId(key), { key, value, expiresAt }));
     return { key, value, shared: true };
   },
 
   async delete(key) {
-    try { await databases.deleteDocument(DB, COLLECTION, docId(key)); } catch (_) {}
+    try { await conRitentativi(() => databases.deleteDocument(DB, COLLECTION, docId(key))); } catch (_) {}
     return { key, deleted: true, shared: true };
   },
 
   async list(prefix = "") {
-    const r = await databases.listDocuments(DB, COLLECTION, [
+    const r = await conRitentativi(() => databases.listDocuments(DB, COLLECTION, [
       Query.startsWith("key", prefix),
       Query.limit(200),
-    ]);
+    ]));
     const ora = Date.now();
     const keys = r.documents.filter((d) => new Date(d.expiresAt).getTime() >= ora).map((d) => d.key);
     return { keys, prefix, shared: true };
