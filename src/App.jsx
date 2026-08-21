@@ -1,5 +1,5 @@
 import { storage } from "./sync";
-import { pick, shuffle, kState, kPlayer, pPrefix, code, uid, encW, decW, rouColore, scrambleTiles, matchGuess } from "./game/utils";
+import { pick, shuffle, kState, kPlayer, pPrefix, code, uid, encW, decW, rouColore, matchGuess } from "./game/utils";
 import { pickQuestion, pickCategory, createSession } from "./game/questionEngine";
 import { simulateRace } from "./game/raceSim";
 import { sfx } from "./game/sound";
@@ -5580,12 +5580,20 @@ const PUZZLE_DESIGNS = [
 
 /* ---------------- PUZZLE SCORREVOLE ---------------- */
 function PuzzleRound({ s, id, write }) {
-  const N = 3, BLANK = N * N - 1;
-  const [tiles, setTiles] = useState(() => scrambleTiles(N, BLANK, 14));
+  const N = 3;
+  const [tiles, setTiles] = useState(() => {
+    const base = Array.from({ length: N * N }, (_, i) => i);
+    let t;
+    do { t = shuffle(base); } while (t.every((x, i) => x === i));
+    return t;
+  });
   const [moves, setMoves] = useState(0);
   const [guess, setGuess] = useState("");
   const [sent, setSent] = useState(false);
   const [wrong, setWrong] = useState(false);
+  /** Pezzo che si sta trascinando: posizione del puntatore e offset dal suo
+   *  angolo, per far seguire il pezzo al dito senza scatti. */
+  const [drag, setDrag] = useState(null);
   const startRef = useRef(Date.now());
   const doneRef = useRef(false);
   const solved = tiles.every((t, i) => t === i);
@@ -5602,15 +5610,31 @@ function PuzzleRound({ s, id, write }) {
     write({ rid: s.rid, puzzleDone: true, elapsed: (Date.now() - startRef.current) / 1000 });
   }, [solved]); // eslint-disable-line
 
-  function tap(i) {
-    const bi = tiles.indexOf(BLANK);
-    const [r1, c1] = [Math.floor(i / N), i % N];
-    const [r2, c2] = [Math.floor(bi / N), bi % N];
-    if (Math.abs(r1 - r2) + Math.abs(c1 - c2) !== 1) return;
-    const t = [...tiles];
-    [t[i], t[bi]] = [t[bi], t[i]];
-    setTiles(t);
-    setMoves((m) => m + 1);
+  /** Un pezzo si trascina ovunque, non solo verso il buco: preso, segue il
+   *  dito; rilasciato sopra un altro pezzo, i due si scambiano di posto. */
+  function startDrag(e, i) {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const rect = e.currentTarget.getBoundingClientRect();
+    setDrag({ idx: i, x: e.clientX, y: e.clientY, ox: e.clientX - rect.left, oy: e.clientY - rect.top, w: rect.width, h: rect.height });
+  }
+  function moveDrag(e) {
+    setDrag((d) => (d ? { ...d, x: e.clientX, y: e.clientY } : d));
+  }
+  function endDrag(e) {
+    setDrag((d) => {
+      if (!d) return d;
+      const under = document.elementFromPoint(e.clientX, e.clientY)?.closest?.("[data-tile]");
+      const targetIdx = under ? Number(under.dataset.tile) : null;
+      if (targetIdx != null && targetIdx !== d.idx) {
+        setTiles((cur) => {
+          const t = [...cur];
+          [t[d.idx], t[targetIdx]] = [t[targetIdx], t[d.idx]];
+          return t;
+        });
+        setMoves((m) => m + 1);
+      }
+      return null;
+    });
   }
 
   async function submit() {
@@ -5628,19 +5652,35 @@ function PuzzleRound({ s, id, write }) {
 
       {!solved ? (
         <>
-          <div className="mx-auto grid w-full max-w-xs gap-1" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+          <div className="mx-auto mb-3 flex items-center gap-2">
+            <div className="aspect-square w-14 shrink-0" style={{ backgroundImage: bg, backgroundSize: "100% 100%", boxShadow: "2px 2px 0 rgba(0,0,0,.5)" }} />
+            <p className="text-xs opacity-60">Il disegno da ricomporre: trascina i pezzi per scambiarli di posto.</p>
+          </div>
+          <div className="relative mx-auto grid w-full max-w-xs gap-1" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
             {tiles.map((t, i) => (
-              <button key={i} onClick={() => tap(i)} aria-label={`pezzo ${i + 1}`}
-                className="press aspect-square w-full"
-                style={t === BLANK ? { background: "rgba(255,243,230,.06)" } : {
+              <div key={i} data-tile={i} aria-label={`pezzo ${i + 1}`}
+                onPointerDown={(e) => startDrag(e, i)} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}
+                className="aspect-square w-full"
+                style={{
                   backgroundImage: bg,
                   backgroundSize: "300% 300%",
                   backgroundPosition: `${(t % N) * 50}% ${Math.floor(t / N) * 50}%`,
                   boxShadow: "2px 2px 0 rgba(0,0,0,.5)",
+                  touchAction: "none",
+                  cursor: "grab",
+                  opacity: drag?.idx === i ? 0.2 : 1,
                 }} />
             ))}
+            {drag && (
+              <div className="pointer-events-none fixed z-50" style={{
+                left: drag.x - drag.ox, top: drag.y - drag.oy, width: drag.w, height: drag.h,
+                backgroundImage: bg, backgroundSize: "300% 300%",
+                backgroundPosition: `${(tiles[drag.idx] % N) * 50}% ${Math.floor(tiles[drag.idx] / N) * 50}%`,
+                boxShadow: "4px 4px 0 rgba(0,0,0,.6)", outline: `3px solid ${C.gold}`,
+              }} />
+            )}
           </div>
-          <p className="mt-3 text-center text-sm opacity-70">Tocca i pezzi vicini al buco per spostarli. Mosse: {moves}</p>
+          <p className="mt-3 text-center text-sm opacity-70">Trascina un pezzo su un altro per scambiarli di posto. Mosse: {moves}</p>
           <p className="mt-1 text-center text-xs opacity-50">Finché non lo completi, le tue lettere restano nascoste. E la squadra ti aspetta.</p>
         </>
       ) : (

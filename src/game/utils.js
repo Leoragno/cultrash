@@ -46,26 +46,6 @@ export function dealLetters(word, members) {
   return out;
 }
 
-/**
- * Mescola il puzzle partendo dallo stato risolto e applicando solo mosse
- * legali: così la configurazione è per costruzione sempre risolvibile.
- */
-export function scrambleTiles(N, BLANK, depth) {
-  let t = Array.from({ length: N * N }, (_, i) => i);
-  let bi = BLANK;
-  for (let k = 0; k < depth; k++) {
-    const [r, c] = [Math.floor(bi / N), bi % N];
-    const opts = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]]
-      .filter(([a, b]) => a >= 0 && a < N && b >= 0 && b < N)
-      .map(([a, b]) => a * N + b);
-    const pickIdx = opts[Math.floor(Math.random() * opts.length)];
-    [t[bi], t[pickIdx]] = [t[pickIdx], t[bi]];
-    bi = pickIdx;
-  }
-  if (t.every((x, i) => x === i)) return scrambleTiles(N, BLANK, depth);
-  return t;
-}
-
 /** Normalizza per confrontare risposte scritte a mano: minuscolo, senza
  *  accenti/punteggiatura, spazi collassati. */
 export function normText(s) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  rouColore, encW, decW, code, dealLetters, scrambleTiles, teamsValid, ROU_ROSSO, ROU_NERO,
+  rouColore, encW, decW, code, dealLetters, teamsValid, ROU_ROSSO, ROU_NERO,
 } from "./utils";
 
 describe("roulette", () => {
@@ -44,29 +44,6 @@ describe("lettere distribuite fra i membri", () => {
     expect(unite).toBe(parola.split("").sort().join(""));
     // Nessuno deve restare a mani vuote se le lettere bastano per tutti.
     if (parola.length >= n) Object.values(lettere).forEach((l) => expect(l.length).toBeGreaterThan(0));
-  });
-});
-
-describe("puzzle scorrevole", () => {
-  it("produce sempre configurazioni valide e mai già risolte", () => {
-    for (let i = 0; i < 300; i++) {
-      const t = scrambleTiles(3, 8, 14);
-      expect(new Set(t).size).toBe(9);
-      expect(t.every((x, j) => x === j)).toBe(false);
-    }
-  });
-
-  it("resta risolvibile: la parità non cambia con mosse legali", () => {
-    for (let i = 0; i < 300; i++) {
-      const t = scrambleTiles(3, 8, 14);
-      const piatta = t.filter((x) => x !== 8);
-      let inv = 0;
-      for (let a = 0; a < piatta.length; a++)
-        for (let b = a + 1; b < piatta.length; b++) if (piatta[a] > piatta[b]) inv++;
-      // Su griglia dispari una configurazione è risolvibile se le
-      // inversioni sono pari.
-      expect(inv % 2).toBe(0);
-    }
   });
 });
 
