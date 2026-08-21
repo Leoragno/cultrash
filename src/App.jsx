@@ -4,7 +4,17 @@ import { pickQuestion, pickCategory, createSession } from "./game/questionEngine
 import { simulateRace } from "./game/raceSim";
 import { sfx } from "./game/sound";
 import { narrate, stopNarration } from "./game/narrator";
+import { PHASE as NOMAD_PHASE, remainingMs as nomadRemainingMs, makeRoundId as nomadRoundId } from "./nomad/engine";
+import { pickTrack as nomadPickTrack, buildResults as nomadBuildResults } from "./nomad/musicRound";
+import { qrPath } from "./nomad/qrcode";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+
+import heroPartyArt from "./assets/hero/card_party_art.webp";
+import heroNomadArt from "./assets/hero/card_nomad_art.webp";
+import heroIconParty from "./assets/hero/icon_party.webp";
+import heroIconNomad from "./assets/hero/icon_nomad.webp";
+import heroLeft from "./assets/hero/hero_left.webp";
+import heroRight from "./assets/hero/hero_right.webp";
 
 /* ============================================================
    CULTRASH PARTY
@@ -2101,6 +2111,9 @@ const RF_TITLES = [
 /* ---------------- utility ---------------- */
 
 const display = { fontFamily: "'Anton','Haettenschweiler','Arial Black',sans-serif", letterSpacing: ".02em", lineHeight: 0.92 };
+/** Font "a pennarello", solo per accenti scritti a mano (titoletti, slogan
+ *  delle card): mai per i titoli grossi, quelli restano su `display`. */
+const marker = { fontFamily: "'Permanent Marker','Segoe Print',cursive", lineHeight: 1.15 };
 const shell = {
   minHeight: "100vh",
   background: `radial-gradient(120% 80% at 50% -10%, ${C.viola} 0%, ${C.ink2} 45%, ${C.ink} 100%)`,
@@ -2554,14 +2567,23 @@ function loadYT() {
   return ytApiPromise;
 }
 
-/** Player YouTube nascosto: suona sullo schermo host senza mostrare video o
- *  titolo (spoilerebbe la risposta). Riproduce `MUSIC_CLIP` secondi dal punto
- *  `start`, poi si mette in pausa; quando `extended` diventa vero riprende da
- *  dove si era fermato per altri `MUSIC_EXT` secondi. */
-function MusicPlayer({ videoId, start, extended }) {
+/** Player YouTube nascosto: suona senza mostrare video o titolo (spoilerebbe
+ *  la risposta). Riproduce `MUSIC_CLIP` secondi dal punto `start`, poi si
+ *  mette in pausa; quando `extended` diventa vero riprende da dove si era
+ *  fermato per altri `MUSIC_EXT` secondi.
+ *
+ *  `startAt` (opzionale, timestamp assoluto in ms) è per NOMAD: senza uno
+ *  schermo condiviso, ogni telefono ha il proprio player, e devono partire
+ *  tutti insieme invece che ognuno quando il proprio si è caricato. Se
+ *  passato, l'avvio non è immediato ma schedulato su quel timestamp — vedi
+ *  NomadMusicRound più sotto per il limite noto di questa sincronizzazione
+ *  (non è mai perfetta al frame: dipende dal buffering di ogni dispositivo).
+ *  Se omesso il comportamento resta quello originale, invariato per PARTY. */
+function MusicPlayer({ videoId, start, extended, startAt }) {
   const hostRef = useRef(null);
   const playerRef = useRef(null);
   const pauseTORef = useRef(null);
+  const startTORef = useRef(null);
   const extendedAppliedRef = useRef(false);
   const [blocked, setBlocked] = useState(false);
 
@@ -2569,18 +2591,28 @@ function MusicPlayer({ videoId, start, extended }) {
     let cancelled = false;
     extendedAppliedRef.current = false;
     setBlocked(false);
+    const tryPlay = (target) => {
+      target.unMute?.();
+      const p = target.playVideo();
+      if (p && typeof p.catch === "function") p.catch(() => setBlocked(true));
+      clearTimeout(pauseTORef.current);
+      pauseTORef.current = setTimeout(() => { try { target.pauseVideo(); } catch (_) {} }, MUSIC_CLIP * 1000);
+    };
     loadYT().then((YT) => {
       if (cancelled || !hostRef.current) return;
       playerRef.current = new YT.Player(hostRef.current, {
         videoId,
-        playerVars: { autoplay: 1, start: start || 0, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1 },
+        playerVars: { autoplay: startAt ? 0 : 1, start: start || 0, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1 },
         events: {
           onReady: (e) => {
-            e.target.unMute?.();
-            const p = e.target.playVideo();
-            if (p && typeof p.catch === "function") p.catch(() => setBlocked(true));
             clearTimeout(pauseTORef.current);
-            pauseTORef.current = setTimeout(() => { try { e.target.pauseVideo(); } catch (_) {} }, MUSIC_CLIP * 1000);
+            clearTimeout(startTORef.current);
+            if (startAt) {
+              const delay = Math.max(0, startAt - Date.now());
+              startTORef.current = setTimeout(() => !cancelled && tryPlay(e.target), delay);
+            } else {
+              tryPlay(e.target);
+            }
           },
           onStateChange: (e) => { if (e.data === 1) setBlocked(false); },
         },
@@ -2589,10 +2621,11 @@ function MusicPlayer({ videoId, start, extended }) {
     return () => {
       cancelled = true;
       clearTimeout(pauseTORef.current);
+      clearTimeout(startTORef.current);
       try { playerRef.current?.destroy(); } catch (_) {}
       playerRef.current = null;
     };
-  }, [videoId, start]);
+  }, [videoId, start, startAt]);
 
   useEffect(() => {
     if (!extended || extendedAppliedRef.current || !playerRef.current) return;
@@ -2619,6 +2652,11 @@ function MusicPlayer({ videoId, start, extended }) {
 /* ============================================================ */
 export default function CultrashParty() {
   const [role, setRole] = useState(null);
+  /** Prima scelta della schermata iniziale: PARTY (schermo condiviso, il
+   *  flusso di sempre) o NOMAD (solo telefoni, nessun host-schermo). `null`
+   *  finché non è stata fatta — vedi ModePicker più sotto. */
+  const [partyMode, setPartyMode] = useState(null);
+  const [nomadPrefill, setNomadPrefill] = useState("");
   const [profile, setProfile] = useState(() => loadLocalProfile());
   const ok = storage.available;
 
@@ -2631,17 +2669,116 @@ export default function CultrashParty() {
     return () => { stop = true; };
   }, []); // eslint-disable-line
 
+  // Deep link di stanza (?room=CODE&mode=nomad|party, dal QR/link condiviso
+  // in NomadLobby): salta direttamente alla schermata di ingresso giusta,
+  // col codice già scritto. Letto una sola volta all'avvio, poi ripulito
+  // dalla barra degli indirizzi perché non riaffiori a un refresh successivo.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const room = (q.get("room") || "").toUpperCase().slice(0, 4);
+    if (!room) return;
+    const m = q.get("mode") === "party" ? "party" : "nomad";
+    setPartyMode(m);
+    if (m === "nomad") { setNomadPrefill(room); setRole(null); }
+    else setRole("player");
+    window.history.replaceState(null, "", window.location.pathname);
+  }, []);
+
   return (
     <div style={shell}>
       <style>{CSS}</style>
       <FullscreenToggle />
-      {profile && !role && <ProfileBadge profile={profile} onEdit={() => setProfile(null)} />}
+      {profile && !partyMode && <ProfileBadge profile={profile} onEdit={() => setProfile(null)} />}
       {!profile && <Login onDone={setProfile} />}
-      {profile && !role && <Roles onPick={setRole} storageOk={!!ok} />}
-      {role === "idee" && <Suggest onExit={() => setRole(null)} />}
-      {role === "host" && <Host onExit={() => setRole(null)} />}
-      {role === "player" && <Player onExit={() => setRole(null)} profile={profile} />}
+      {profile && !partyMode && <ModePicker onPick={setPartyMode} storageOk={!!ok} />}
+      {profile && partyMode === "party" && !role && <Roles onPick={setRole} onBack={() => setPartyMode(null)} storageOk={!!ok} />}
+      {profile && partyMode === "party" && role === "idee" && <Suggest onExit={() => setRole(null)} />}
+      {profile && partyMode === "party" && role === "host" && <Host onExit={() => setRole(null)} />}
+      {profile && partyMode === "party" && role === "player" && <Player onExit={() => setRole(null)} profile={profile} />}
+      {profile && partyMode === "nomad" && (
+        <NomadEntry profile={profile} prefillRoom={nomadPrefill} onExit={() => { setPartyMode(null); setNomadPrefill(""); }} />
+      )}
     </div>
+  );
+}
+
+/* ============================================================
+   SCELTA MODALITÀ — PARTY (schermo condiviso) o NOMAD (solo telefoni).
+   Prima schermata dopo il login: deve essere comprensibile anche a chi non
+   sa nulla del gioco, quindi due card grandi con l'idea in una riga sola,
+   niente spiegazioni lunghe qui — quelle stanno nelle schermate successive.
+   Illustrazioni ritagliate da un mockup dedicato (src/assets/hero, vedi i
+   commenti lì): coerenti con l'identità CULTRASH ma più "poster da festa"
+   di quanto renda il solo CSS, per una schermata che tutti vedono per prima. */
+const HERO_FEATURES = [
+  { emoji: "👥", color: C.magenta, label: "Da 2 a 20 giocatori", desc: "Più siete, più è trash" },
+  { emoji: "⚡", color: C.cyan, label: "Minigiochi assurdi", desc: "Sfide, quiz e tanto altro" },
+  { emoji: "👑", color: C.gold, label: "Punteggi in tempo reale", desc: "Vinci e sali in classifica" },
+  { emoji: "🔥", color: C.arancio, label: "100% divertimento", desc: "Zero filtri, solo trash" },
+];
+
+function ModePicker({ onPick, storageOk }) {
+  return (
+    <div className="tvin relative min-h-screen overflow-hidden px-6 py-10 sm:px-10">
+      <img src={heroLeft} alt="" aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 hidden w-[30vw] max-w-md object-cover object-right opacity-90 md:block"
+        style={{ maskImage: "linear-gradient(to right, black 60%, transparent 100%)", WebkitMaskImage: "linear-gradient(to right, black 60%, transparent 100%)" }} />
+      <img src={heroRight} alt="" aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 hidden w-[30vw] max-w-md object-cover object-left opacity-90 md:block"
+        style={{ maskImage: "linear-gradient(to left, black 60%, transparent 100%)", WebkitMaskImage: "linear-gradient(to left, black 60%, transparent 100%)" }} />
+
+      <div className="relative mx-auto flex max-w-2xl flex-col items-center text-center">
+        <p className="mb-1 flex items-center gap-2 text-lg" style={{ ...marker, color: C.lime }}>Come giocate stasera? <span aria-hidden="true">👑</span></p>
+        <h1 className="text-6xl uppercase sm:text-8xl" style={display}>Cul<span style={{ color: C.magenta }}>trash</span></h1>
+        <div className="mt-1 h-1 w-36 rounded-full" style={{ background: C.lime }} />
+        <p className="mt-4 max-w-md text-sm opacity-80">Scegli la modalità e prepara la sfida più trash di sempre.</p>
+      </div>
+
+      <div className="relative mx-auto mt-10 grid max-w-3xl gap-5 sm:grid-cols-2">
+        <ModeCard color={C.lime} art={heroPartyArt} icon={heroIconParty}
+          title="Party" tagline="Uno schermo per tutti"
+          desc="Un dispositivo fa da schermo principale. Gli altri giocano dal telefono."
+          cta="Scegli Party" onClick={() => onPick("party")} />
+        <ModeCard color={C.magenta} art={heroNomadArt} icon={heroIconNomad}
+          title="Nomad" tagline="Ogni giocatore col proprio telefono"
+          desc="Nessuna TV. Nessun host. Solo voi e i vostri telefoni."
+          cta="Scegli Nomad" onClick={() => onPick("nomad")} />
+      </div>
+
+      <div className="relative mx-auto mt-10 grid max-w-3xl grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-4">
+        {HERO_FEATURES.map((f) => (
+          <div key={f.label} className="flex items-center gap-2">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 text-lg" style={{ borderColor: f.color }}>{f.emoji}</span>
+            <div className="text-left">
+              <p className="text-xs font-bold uppercase leading-tight" style={{ color: f.color }}>{f.label}</p>
+              <p className="text-[11px] leading-tight opacity-60">{f.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {!storageOk && <p className="relative mx-auto mt-6 max-w-3xl border-2 p-3 text-center text-sm" style={{ borderColor: C.magenta }}>La sincronizzazione non è disponibile qui. Apri l'app dal link condiviso per giocare su più dispositivi.</p>}
+    </div>
+  );
+}
+
+function ModeCard({ color, art, icon, title, tagline, desc, cta, onClick }) {
+  return (
+    <button onClick={onClick} className="press relative flex flex-col overflow-hidden pb-6 pt-14 text-left" style={{ background: color }}>
+      <span aria-hidden="true" className="absolute -left-8 top-5 -rotate-6 text-2xl opacity-40" style={{ color: C.ink }}>⚡</span>
+      <span aria-hidden="true" className="absolute -right-4 top-9 rotate-12 text-xl opacity-30" style={{ color: C.ink }}>⚡</span>
+      <div className="absolute -left-3 -right-3 top-5 -rotate-3 py-2 text-center" style={{ background: "rgba(20,6,32,.55)" }}>
+        <p className="text-sm font-bold uppercase tracking-widest" style={{ color: C.cream }}>Modalità {title}</p>
+      </div>
+      <div className="relative mx-auto mt-4 max-h-32 w-full px-5" style={{ maskImage: "radial-gradient(ellipse 62% 68% at 50% 50%, black 50%, transparent 100%)", WebkitMaskImage: "radial-gradient(ellipse 62% 68% at 50% 50%, black 50%, transparent 100%)" }}>
+        <img src={art} alt="" aria-hidden="true" className="h-full w-full object-contain" />
+      </div>
+      <div className="relative mt-4 flex items-center gap-2 px-5">
+        <img src={icon} alt="" aria-hidden="true" className="h-10 w-10 object-contain" />
+        <p className="text-4xl uppercase" style={{ ...display, color: C.ink }}>{title}</p>
+      </div>
+      <p className="relative px-5 text-lg" style={{ ...marker, color: C.ink }}>{tagline}</p>
+      <p className="relative mt-2 px-5 text-sm" style={{ color: C.ink, opacity: 0.75 }}>{desc}</p>
+      <span className="relative mx-5 mt-4 inline-flex w-fit items-center gap-2 rounded-full px-5 py-3 text-sm font-bold uppercase" style={{ background: C.ink, color }}>{cta} →</span>
+    </button>
   );
 }
 
@@ -2729,9 +2866,10 @@ function ProfileBadge({ profile, onEdit }) {
   );
 }
 
-function Roles({ onPick, storageOk }) {
+function Roles({ onPick, onBack, storageOk }) {
   return (
     <div className="tvin mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-10">
+      {onBack && <button onClick={onBack} className="mb-4 w-fit text-xs font-bold uppercase tracking-widest opacity-60">← Party o Nomad?</button>}
       <p className="mb-3 text-xs font-bold uppercase tracking-widest" style={{ color: C.lime }}>Quiz di gruppo · schermo grande + telefoni</p>
       <h1 className="text-6xl uppercase sm:text-8xl" style={display}>Cul<span style={{ color: C.magenta }}>trash</span></h1>
       <div className="mt-4 -rotate-1 px-4 py-3" style={{ background: C.magenta }}>
@@ -6708,6 +6846,665 @@ function Player({ onExit, profile }) {
       })()}
 
       {msg && <p className="mt-3 text-center text-xs" style={{ color: C.gold }}>{msg}</p>}
+    </div>
+  );
+}
+
+/* ============================================================
+   NOMAD — ogni giocatore usa solo il proprio telefono, nessuno schermo
+   condiviso. Stessa infrastruttura di sync di PARTY (kState/kPlayer,
+   polling — vedi src/sync/), stesso motore domande (src/game/questionEngine),
+   stessa regola di punteggio del round "Indovina la Canzone/Sigla" (vedi
+   src/nomad/musicRound.js, che replica la risoluzione della fase "music" più
+   sopra). Cambia solo CHI orchestra il round e COSA vede ogni telefono.
+
+   Chi crea la stanza ("il regista") gioca anche lui dal proprio telefono: il
+   suo browser esegue in sottofondo lo stesso tipo di loop che in PARTY gira
+   sullo schermo host (vedi useNomadOrchestrator), ma non produce alcuna
+   vista condivisa — il suo telefono mostra la sua schermata di giocatore
+   come chiunque altro, con in più i comandi per avviare/terminare la
+   partita.
+
+   Stato pubblico (kState(room), src/nomad/engine.js per la macchina a
+   stati): fase, elenco giocatori, round corrente, timestamp assoluti per
+   audio e countdown. La risposta corretta del round NON viene MAI scritta
+   lì prima che il round sia chiuso — resta solo nella memoria del regista
+   (stessa scelta già fatta per "music" in ask()/resolve() più sopra), così
+   nessun client la può leggere in anticipo dal proprio poll. Le risposte di
+   ogni giocatore restano sulla sua chiave privata (kPlayer(room,id)),
+   scritta solo da lui/lei e letta solo dal regista — mai spedita agli altri.
+
+   Limite architetturale onesto, non aggirato con un trucco lato UI: questa
+   infrastruttura (vedi src/sync/) non ha un vero backend con controllo
+   accessi per-chiave, quindi "il regista" resta un client fidato esattamente
+   come lo è oggi l'host di PARTY, non un server. Un vero anti-cheat
+   richiederebbe una Function/RPC lato Appwrite — fuori portata senza le
+   credenziali del progetto, vedi il report a fine implementazione. */
+
+const NOMAD_MAX_PLAYERS = 10;
+const NOMAD_ROUNDS = 5;
+const NOMAD_STARTING_MS = 3000;
+const NOMAD_INTRO_MS = 3500;
+/** Margine fra la fine dell'intro e l'avvio dell'audio: dà tempo a ogni
+ *  telefono di aver ricevuto il round (poll) e caricato il player YouTube
+ *  prima dell'istante condiviso — vedi MusicPlayer/startAt più sopra per il
+ *  limite noto di questa sincronizzazione. */
+const NOMAD_AUDIO_LEAD_MS = 1200;
+const NOMAD_ANSWER_MS = 45000;
+const NOMAD_RESULTS_MS = 7000;
+const NOMAD_HEARTBEAT_MS = 4000;
+const NOMAD_STALE_MS = 13000;
+const NOMAD_MUSIC_BANKS = { canzone: MUSICA, sigla: SIGLE };
+
+function nomadPub(ps) {
+  return ps.map((p) => ({ id: p.id, name: p.name, color: p.color, score: p.score, ready: !!p.ready }));
+}
+
+/** Il loop di orchestrazione della stanza NOMAD: gira solo nel telefono di
+ *  chi ha creato la stanza (isCreator), no-op altrove. È un hook (chiamato
+ *  sempre, regole degli hook) e non un componente separato, così chi lo usa
+ *  passa startGame/endGame direttamente ai bottoni della UI del giocatore
+ *  senza bisogno di ref/forwardRef fra componenti fratelli. */
+function useNomadOrchestrator(room, profile, isCreator) {
+  const phaseRef = useRef(NOMAD_PHASE.LOBBY);
+  const playersRef = useRef([]);
+  const [, force] = useState(0); // rirender minimo, solo per la lista giocatori in lobby
+  const roundRef = useRef(0);
+  const submissionsRef = useRef({});
+  const sessionRef = useRef(createSession());
+  const timersRef = useRef([]);
+  const pollRef = useRef(null);
+  const lobbyScanRef = useRef(null);
+  const lastPayloadRef = useRef(null);
+
+  const clearAllTimers = () => {
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (lobbyScanRef.current) { clearInterval(lobbyScanRef.current); lobbyScanRef.current = null; }
+  };
+  const after = (ms, fn) => { const t = setTimeout(fn, ms); timersRef.current.push(t); return t; };
+
+  const push = useCallback(async (payload) => {
+    lastPayloadRef.current = payload;
+    try { await storage.set(kState(room), JSON.stringify({ ...payload, ts: Date.now() }), true); }
+    catch (_) { /* si riallinea al giro di poll/battito successivo */ }
+  }, [room]);
+
+  const publishLobby = useCallback(() => {
+    push({ mode: "nomad", room, phase: NOMAD_PHASE.LOBBY, hostId: profile.id, players: nomadPub(playersRef.current), round: 0, totalRounds: NOMAD_ROUNDS });
+  }, [push, room, profile.id]);
+
+  /* scansione lobby: stesso pattern della lobby di Host (vedi scan() più
+     sopra), senza squadre. Gira SOLO finché la fase è LOBBY: una volta
+     avviata la partita, startGame() ferma l'intervallo (vedi lobbyScanRef),
+     e questa guardia copre anche la finestra fra l'avvio e quello stop,
+     altrimenti la scansione continuerebbe a ripubblicare "fase LOBBY" sopra
+     lo stato del round in corso — un vero bug trovato testando in locale
+     con due schede, non solo un'ipotesi. */
+  useEffect(() => {
+    if (!isCreator) return;
+    let stop = false, inCorso = false;
+    const scan = async () => {
+      if (phaseRef.current !== NOMAD_PHASE.LOBBY) return;
+      if (inCorso) return; inCorso = true;
+      try {
+        const res = await storage.list(pPrefix(room), true);
+        await Promise.all((res?.keys || []).map((k) => k.split(":").pop()).map(async (id) => {
+          try {
+            const r = await storage.get(kPlayer(room, id), true);
+            const d = JSON.parse(r.value);
+            if (stop) return;
+            const ps = playersRef.current;
+            const ex = ps.find((p) => p.id === id);
+            if (!ex) {
+              if (ps.length >= NOMAD_MAX_PLAYERS) return;
+              playersRef.current = [...ps, { id, name: (d.name || "Anonimo").slice(0, 12), color: d.color || PCOL[ps.length % PCOL.length], score: 0, ready: !!d.ready }];
+            } else {
+              const newName = (d.name || ex.name).slice(0, 12);
+              const newReady = !!d.ready;
+              const newColor = d.color || ex.color;
+              if (newName !== ex.name || newReady !== ex.ready || newColor !== ex.color)
+                playersRef.current = ps.map((p) => (p.id === id ? { ...p, name: newName, ready: newReady, color: newColor } : p));
+            }
+          } catch (_) {}
+        }));
+        if (stop || phaseRef.current !== NOMAD_PHASE.LOBBY) return;
+        force((x) => x + 1);
+        publishLobby();
+      } catch (_) {}
+      finally { inCorso = false; }
+    };
+    scan();
+    const t = setInterval(scan, POLL_HOST);
+    lobbyScanRef.current = t;
+    return () => { stop = true; clearInterval(t); };
+  }, [isCreator, room, publishLobby]);
+
+  /* battito: ripubblica l'ultimo stato noto ogni pochi secondi anche senza
+     cambi di fase, così i telefoni possono accorgersi se il regista sparisce
+     (kState.ts smette di avanzare) invece di restare bloccati in silenzio. */
+  useEffect(() => {
+    if (!isCreator) return;
+    const t = setInterval(() => { if (lastPayloadRef.current) push(lastPayloadRef.current); }, NOMAD_HEARTBEAT_MS);
+    return () => clearInterval(t);
+  }, [isCreator, push]);
+
+  /* Il regista è un telefono come gli altri, non uno schermo che resta
+   *  sempre acceso: se si blocca lo schermo o si passa a un'altra app, Chrome
+   *  rallenta drasticamente i setTimeout/setInterval delle schede in
+   *  background (throttling), fermando di fatto l'avanzamento dei round per
+   *  tutti — verificato testando in locale con due schede. La Wake Lock API
+   *  non impedisce di cambiare app, ma tiene lo schermo acceso finché resta
+   *  in primo piano, che è la causa più comune; fallisce in silenzio dove
+   *  non è supportata (safari desktop, browser vecchi). */
+  useEffect(() => {
+    if (!isCreator || !navigator.wakeLock) return;
+    let lock = null, cancelled = false;
+    const acquire = async () => {
+      try { lock = await navigator.wakeLock.request("screen"); } catch (_) { /* negata o non supportata: si ignora */ }
+    };
+    const onVisible = () => { if (!cancelled && document.visibilityState === "visible" && !lock) acquire(); };
+    acquire();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      try { lock?.release(); } catch (_) {}
+    };
+  }, [isCreator]);
+
+  useEffect(() => () => { if (isCreator) clearAllTimers(); }, [isCreator]);
+
+  function beginRound(n) {
+    roundRef.current = n;
+    const bank = pick(Object.keys(NOMAD_MUSIC_BANKS));
+    const track = nomadPickTrack(NOMAD_MUSIC_BANKS[bank], sessionRef.current, `nomad-${bank}`);
+    submissionsRef.current = {};
+    const now = Date.now();
+    const playingStartsAt = now + NOMAD_INTRO_MS;
+    const audioStartAt = playingStartsAt + NOMAD_AUDIO_LEAD_MS;
+    const answerEndsAt = playingStartsAt + NOMAD_ANSWER_MS;
+    const rid = nomadRoundId(n);
+    phaseRef.current = NOMAD_PHASE.ROUND_INTRO;
+    push({
+      mode: "nomad", room, phase: NOMAD_PHASE.ROUND_INTRO, hostId: profile.id,
+      players: nomadPub(playersRef.current), round: n, totalRounds: NOMAD_ROUNDS,
+      game: bank, rid, introEndsAt: playingStartsAt, audioStartAt, answerEndsAt,
+      videoId: track.id, start: track.start || 0,
+    });
+    after(NOMAD_INTRO_MS, () => enterPlaying(n, rid, bank, audioStartAt, answerEndsAt, track));
+  }
+
+  function enterPlaying(n, rid, bank, audioStartAt, answerEndsAt, track) {
+    phaseRef.current = NOMAD_PHASE.PLAYING;
+    push({
+      mode: "nomad", room, phase: NOMAD_PHASE.PLAYING, hostId: profile.id,
+      players: nomadPub(playersRef.current), round: n, totalRounds: NOMAD_ROUNDS,
+      game: bank, rid, audioStartAt, answerEndsAt, videoId: track.id, start: track.start || 0,
+    });
+    let locked = false;
+    const doLock = () => {
+      if (locked) return;
+      locked = true;
+      clearAllTimers();
+      lockAndResolve(n, rid, bank, track);
+    };
+    pollRef.current = setInterval(async () => {
+      await Promise.all(playersRef.current.map(async (p) => {
+        if (submissionsRef.current[p.id]) return;
+        try {
+          const r = await storage.get(kPlayer(room, p.id), true);
+          const d = JSON.parse(r.value);
+          if (d.rid !== rid) return;
+          if (d.pass) submissionsRef.current[p.id] = { pass: true };
+          else if (d.title || d.artist) submissionsRef.current[p.id] = { title: d.title || "", artist: d.artist || "" };
+        } catch (_) {}
+      }));
+      const allIn = playersRef.current.length > 0 && playersRef.current.every((p) => submissionsRef.current[p.id]);
+      if (allIn) doLock();
+    }, POLL_HOST);
+    after(nomadRemainingMs(answerEndsAt) + 400, doLock);
+  }
+
+  function lockAndResolve(n, rid, bank, track) {
+    phaseRef.current = NOMAD_PHASE.ANSWER_LOCKED;
+    push({ mode: "nomad", room, phase: NOMAD_PHASE.ANSWER_LOCKED, hostId: profile.id, players: nomadPub(playersRef.current), round: n, totalRounds: NOMAD_ROUNDS, game: bank, rid });
+    const results = nomadBuildResults(track, playersRef.current, submissionsRef.current);
+    playersRef.current = playersRef.current.map((p) => {
+      const row = results.find((r) => r.id === p.id);
+      return { ...p, score: Math.max(0, p.score + (row?.pts || 0)) };
+    });
+    phaseRef.current = NOMAD_PHASE.RESULTS;
+    push({
+      mode: "nomad", room, phase: NOMAD_PHASE.RESULTS, hostId: profile.id,
+      players: nomadPub(playersRef.current), round: n, totalRounds: NOMAD_ROUNDS, game: bank, rid,
+      track: { title: track.title, artist: track.artist }, results,
+    });
+    after(NOMAD_RESULTS_MS, () => {
+      if (n >= NOMAD_ROUNDS) { endGame(); return; }
+      beginRound(n + 1);
+    });
+  }
+
+  function startGame() {
+    if (!isCreator || phaseRef.current !== NOMAD_PHASE.LOBBY) return;
+    if (playersRef.current.length < 2 || !playersRef.current.every((p) => p.ready)) return;
+    if (lobbyScanRef.current) { clearInterval(lobbyScanRef.current); lobbyScanRef.current = null; }
+    phaseRef.current = NOMAD_PHASE.STARTING;
+    push({ mode: "nomad", room, phase: NOMAD_PHASE.STARTING, hostId: profile.id, players: nomadPub(playersRef.current), round: 0, totalRounds: NOMAD_ROUNDS });
+    after(NOMAD_STARTING_MS, () => beginRound(1));
+  }
+
+  function endGame() {
+    if (!isCreator || phaseRef.current === NOMAD_PHASE.GAME_OVER) return;
+    clearAllTimers();
+    const finalRank = [...playersRef.current].sort((a, b) => b.score - a.score).map(({ id, name, color, score }) => ({ id, name, color, score }));
+    phaseRef.current = NOMAD_PHASE.GAME_OVER;
+    push({ mode: "nomad", room, phase: NOMAD_PHASE.GAME_OVER, hostId: profile.id, players: nomadPub(playersRef.current), round: roundRef.current, totalRounds: NOMAD_ROUNDS, finalRank });
+  }
+
+  return { startGame, endGame };
+}
+
+/** QR della stanza, coi colori CULTRASH invece del solito bianco e nero:
+ *  restano comunque ad alto contrasto (ink su cream) per la fotocamera. */
+function RoomQr({ text, size = 168 }) {
+  const { path, size: n, margin } = useMemo(() => qrPath(text), [text]);
+  const view = n + margin * 2;
+  return (
+    <svg viewBox={`-${margin} -${margin} ${view} ${view}`} width={size} height={size} shapeRendering="crispEdges" role="img" aria-label="QR code della stanza">
+      <rect x={-margin} y={-margin} width={view} height={view} fill={C.cream} />
+      <path d={path} fill={C.ink} />
+    </svg>
+  );
+}
+
+/** Countdown locale calcolato da un timestamp assoluto condiviso, non da un
+ *  contatore che decrementa da solo: ogni tick lo ricalcola da zero rispetto
+ *  a `endsAt`, così resta corretto anche se il tab perde qualche frame o si
+ *  è appena riconnesso — mai una sincronizzazione finta basata solo sullo
+ *  stato locale. */
+function useNomadCountdown(endsAt) {
+  const [left, setLeft] = useState(() => (endsAt ? nomadRemainingMs(endsAt) / 1000 : 0));
+  useEffect(() => {
+    if (!endsAt) { setLeft(0); return; }
+    setLeft(nomadRemainingMs(endsAt) / 1000);
+    const t = setInterval(() => setLeft(nomadRemainingMs(endsAt) / 1000), 200);
+    return () => clearInterval(t);
+  }, [endsAt]);
+  return left;
+}
+
+/** Punto di ingresso NOMAD: crea o entra in una stanza, poi passa il
+ *  controllo a NomadRoom. Il codice di una stanza Party viene rifiutato con
+ *  un messaggio chiaro invece di un errore generico — le due modalità
+ *  condividono lo stesso spazio di chiavi ma non sono intercambiabili. */
+function NomadEntry({ profile, prefillRoom, onExit }) {
+  const [room, setRoom] = useState(null);
+  const [isCreator, setIsCreator] = useState(false);
+  const [joinCode, setJoinCode] = useState(prefillRoom || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function create() {
+    setBusy(true); setErr("");
+    try {
+      const r = code();
+      await storage.set(kState(r), JSON.stringify({
+        mode: "nomad", room: r, phase: NOMAD_PHASE.LOBBY, hostId: profile.id,
+        players: [], round: 0, totalRounds: NOMAD_ROUNDS,
+      }), true);
+      setRoom(r); setIsCreator(true);
+    } catch (_) { setErr("Non riesco a creare la stanza. Riprova."); }
+    setBusy(false);
+  }
+
+  async function join(codeArg) {
+    const rc = (codeArg ?? joinCode).trim().toUpperCase();
+    if (rc.length !== 4) { setErr("Il codice è di quattro lettere."); return; }
+    setBusy(true); setErr("");
+    try {
+      const r = await storage.get(kState(rc), true);
+      const st = JSON.parse(r.value);
+      if (st.mode !== "nomad") { setErr("Questo codice è di una stanza Party: torna indietro e scegli Party."); setBusy(false); return; }
+      if (st.phase !== NOMAD_PHASE.LOBBY) { setErr("La partita in quella stanza è già iniziata."); setBusy(false); return; }
+      if ((st.players || []).length >= NOMAD_MAX_PLAYERS) { setErr("Quella stanza è piena."); setBusy(false); return; }
+      setRoom(rc); setIsCreator(false);
+    } catch (_) { setErr("Codice non trovato. Controlla di averlo scritto giusto."); }
+    setBusy(false);
+  }
+
+  useEffect(() => { if (prefillRoom) join(prefillRoom); }, []); // eslint-disable-line
+
+  if (room) return <NomadRoom room={room} profile={profile} isCreator={isCreator} onExit={onExit} />;
+
+  return (
+    <div className="tvin mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-10">
+      <button onClick={onExit} className="mb-4 w-fit text-xs font-bold uppercase tracking-widest opacity-60">← Party o Nomad?</button>
+      <p className="mb-3 text-xs font-bold uppercase tracking-widest" style={{ color: C.magenta }}>📱 Nomad · nessuna TV, nessun host</p>
+      <h2 className="text-5xl uppercase" style={display}>Solo telefoni</h2>
+      <p className="mt-2 text-sm opacity-70">Chi crea la stanza gioca anche lui/lei dal telefono: nessuno schermo condiviso, questa volta.</p>
+
+      <button onClick={create} disabled={busy} className="press mt-8 w-full py-5 text-2xl uppercase"
+        style={{ ...display, background: C.magenta, color: C.cream, boxShadow: `6px 6px 0 ${C.lime}` }}>
+        Crea una stanza
+      </button>
+
+      <p className="mb-2 mt-8 text-xs font-bold uppercase tracking-widest opacity-60">Oppure entra con un codice</p>
+      <input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 4))} placeholder="CODICE"
+        onKeyDown={(e) => e.key === "Enter" && join()}
+        className="w-full border-2 bg-transparent px-4 py-4 text-center text-4xl font-bold tracking-widest"
+        style={{ borderColor: C.gold, color: C.gold }} inputMode="text" autoCapitalize="characters" />
+      <button onClick={() => join()} disabled={busy || joinCode.trim().length !== 4} className="press mt-3 w-full py-4 text-xl uppercase"
+        style={{ ...display, background: joinCode.trim().length === 4 ? C.lime : "rgba(255,243,230,.12)", color: joinCode.trim().length === 4 ? C.ink : "rgba(255,243,230,.5)" }}>
+        Entra nella stanza
+      </button>
+      {err && <p className="mt-4 border-2 p-3 text-sm" style={{ borderColor: C.magenta, color: C.cream }}>{err}</p>}
+    </div>
+  );
+}
+
+/** Guscio della stanza NOMAD: fa girare l'orchestratore (solo se creatore) e
+ *  fa il poll dello stato pubblico esattamente come il telefono di un
+ *  giocatore in PARTY (vedi Player più sopra) — ogni schermata NOMAD deriva
+ *  interamente da `s`, mai da uno stato locale accumulato, così un refresh
+ *  o una riconnessione ritrovano da soli il punto esatto della partita. */
+function NomadRoom({ room, profile, isCreator, onExit }) {
+  const { startGame, endGame } = useNomadOrchestrator(room, profile, isCreator);
+  const [s, setS] = useState(null);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let stop = false, inCorso = false;
+    const tick = async () => {
+      if (inCorso) return; inCorso = true;
+      try {
+        const r = await storage.get(kState(room), true);
+        if (stop) return;
+        setS(JSON.parse(r.value));
+        setErr("");
+      } catch (_) { setErr("Sto ricollegando..."); }
+      finally { inCorso = false; }
+    };
+    tick();
+    const t = setInterval(tick, POLL_PLAYER);
+    return () => { stop = true; clearInterval(t); };
+  }, [room]);
+
+  if (!s) return (
+    <div className="tvin mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-6 py-10 text-center">
+      <p className="text-2xl uppercase" style={display}>Aprendo la stanza…</p>
+      {err && <p className="mt-3 text-sm opacity-70">{err}</p>}
+    </div>
+  );
+
+  return <NomadPlayerView room={room} s={s} profile={profile} isCreator={isCreator} onStart={startGame} onEnd={endGame} onExit={onExit} err={err} />;
+}
+
+/** Schermata del singolo telefono: sceglie il blocco giusto in base a
+ *  `s.phase` (macchina a stati di src/nomad/engine.js). Nessun blocco legge
+ *  mai altro che `s` (pubblico) e le proprie scritture — mai i dati privati
+ *  di un altro giocatore. */
+function NomadPlayerView({ room, s, profile, isCreator, onStart, onEnd, onExit, err }) {
+  const me = (s.players || []).find((p) => p.id === profile.id);
+  const hostStale = s.phase !== NOMAD_PHASE.GAME_OVER && Date.now() - (s.ts || 0) > NOMAD_STALE_MS;
+
+  async function write(obj) {
+    try { await storage.set(kPlayer(room, profile.id), JSON.stringify({ id: profile.id, name: profile.name, color: profile.color, ...obj }), true); return true; }
+    catch (_) { return false; }
+  }
+
+  return (
+    <div className="tvin mx-auto flex min-h-screen max-w-md flex-col px-6 py-8">
+      <div className="mb-3 flex items-center justify-between text-xs font-bold uppercase tracking-widest opacity-60">
+        <span>📱 Nomad · {s.room || room}</span>
+        {me && <span style={{ color: me.color }}>{me.name} · {me.score || 0} pt</span>}
+      </div>
+      {hostStale && (
+        <p className="mb-3 border-2 p-2 text-center text-xs font-bold" style={{ borderColor: C.magenta, color: C.cream }}>
+          Il regista ({(s.players || []).find((p) => p.id === s.hostId)?.name || "host"}) non risponde da un po'. Se non si sblocca, uscite e ricreate la stanza.
+        </p>
+      )}
+
+      {(s.phase === NOMAD_PHASE.LOBBY || s.phase === NOMAD_PHASE.STARTING) && (
+        <NomadLobbyPhase room={room} s={s} isCreator={isCreator} write={write} onStart={onStart} onExit={onExit} />
+      )}
+      {s.phase === NOMAD_PHASE.ROUND_INTRO && <NomadIntroPhase s={s} />}
+      {s.phase === NOMAD_PHASE.PLAYING && <NomadPlayingPhase s={s} write={write} />}
+      {s.phase === NOMAD_PHASE.ANSWER_LOCKED && (
+        <div className="flex flex-1 flex-col items-center justify-center text-center">
+          <p className="text-2xl uppercase" style={display}>Risposte bloccate</p>
+          <p className="mt-2 text-sm opacity-70">Calcolo dei punti in corso…</p>
+        </div>
+      )}
+      {s.phase === NOMAD_PHASE.RESULTS && <NomadResultsPhase s={s} profile={profile} />}
+      {s.phase === NOMAD_PHASE.GAME_OVER && <NomadGameOverPhase s={s} profile={profile} onExit={onExit} />}
+
+      {isCreator && s.phase !== NOMAD_PHASE.LOBBY && s.phase !== NOMAD_PHASE.STARTING && s.phase !== NOMAD_PHASE.GAME_OVER && (
+        <button onClick={onEnd} className="press mt-4 w-full border-2 py-2 text-xs font-bold uppercase tracking-wide"
+          style={{ borderColor: "rgba(255,46,134,.4)", color: C.magenta }}>
+          Termina la partita
+        </button>
+      )}
+      {err && <p className="mt-3 text-center text-xs" style={{ color: C.gold }}>{err}</p>}
+    </div>
+  );
+}
+
+function NomadLobbyPhase({ room, s, isCreator, write, onStart, onExit }) {
+  const [ready, setReady] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const players = s.players || [];
+  const shareUrl = `${window.location.origin}${window.location.pathname}?room=${room}&mode=nomad`;
+
+  // Scrive subito una riga in lobby (nome/colore aggiornati, non ancora
+  // pronto): senza questo il regista non vedrebbe questo giocatore finché
+  // non tocca "Sono pronto" la prima volta.
+  useEffect(() => { write({ ready: false }); }, []); // eslint-disable-line
+
+  async function toggleReady() {
+    const next = !ready;
+    setReady(next);
+    const ok = await write({ ready: next });
+    if (!ok) setReady(!next);
+  }
+
+  async function shareRoom() {
+    if (navigator.share) {
+      try { await navigator.share({ title: "CULTRASH Nomad", text: `Unisciti alla stanza ${room}`, url: shareUrl }); return; } catch (_) { /* annullato o non supportato: ripiega sulla copia */ }
+    }
+    try { await navigator.clipboard?.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch (_) {}
+  }
+
+  const allReady = players.length >= 2 && players.every((p) => p.ready);
+
+  if (s.phase === NOMAD_PHASE.STARTING) return (
+    <div className="flex flex-1 flex-col items-center justify-center text-center">
+      <p className="pop text-6xl uppercase" style={{ ...display, color: C.magenta }}>Si parte</p>
+      <p className="mt-2 text-sm opacity-70">Tenete pronti i telefoni.</p>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-1 flex-col">
+      <p className="text-xs font-bold uppercase tracking-widest opacity-60">Codice stanza</p>
+      <div className="mt-1 flex items-center gap-4">
+        <p className="text-6xl font-bold tracking-widest" style={{ ...display, color: C.gold }}>{room}</p>
+        <RoomQr text={shareUrl} size={84} />
+      </div>
+      <button onClick={shareRoom} className="press mt-2 w-fit border-2 px-3 py-2 text-xs font-bold uppercase" style={{ borderColor: "rgba(255,243,230,.3)", color: C.cream }}>
+        {copied ? "Link copiato!" : "Condividi il link della stanza"}
+      </button>
+
+      <p className="mb-2 mt-6 text-xs font-bold uppercase tracking-widest opacity-60">Giocatori ({players.length})</p>
+      <div className="space-y-2">
+        {players.map((p) => (
+          <div key={p.id} className="flex items-center gap-3 border-2 px-3 py-2" style={{ borderColor: p.ready ? C.lime : "rgba(255,243,230,.15)" }}>
+            <span className="h-8 w-8 shrink-0" style={{ background: p.color }} />
+            <span className="flex-1 font-bold">{p.name}{p.id === s.hostId && <span className="ml-2 text-xs font-normal uppercase opacity-60">host</span>}</span>
+            <span className="text-xs font-bold uppercase" style={{ color: p.ready ? C.lime : "rgba(255,243,230,.4)" }}>{p.ready ? "Pronto" : "In attesa"}</span>
+          </div>
+        ))}
+        {!players.length && <p className="py-4 text-center text-sm opacity-60">In attesa che qualcuno entri…</p>}
+      </div>
+
+      <button onClick={toggleReady} className="press mt-6 w-full py-4 text-xl uppercase"
+        style={{ ...display, background: ready ? "rgba(255,243,230,.12)" : C.lime, color: ready ? C.cream : C.ink }}>
+        {ready ? "Annulla pronto" : "Sono pronto"}
+      </button>
+
+      {isCreator && (
+        <>
+          <button onClick={onStart} disabled={!allReady} className="press mt-3 w-full py-5 text-2xl uppercase"
+            style={{ ...display, background: allReady ? C.magenta : "rgba(255,243,230,.12)", color: allReady ? C.cream : "rgba(255,243,230,.5)", boxShadow: allReady ? `6px 6px 0 ${C.lime}` : "none" }}>
+            Avvia partita
+          </button>
+          {!allReady && <p className="mt-2 text-center text-xs opacity-60">Servono almeno due giocatori, tutti pronti (anche tu).</p>}
+          <p className="mt-3 text-center text-xs opacity-50">Tu organizzi il gioco: tieni questo telefono con lo schermo acceso e l'app in primo piano per tutta la partita, o i round rischiano di rallentare per tutti.</p>
+        </>
+      )}
+      <button onClick={onExit} className="press mt-6 w-full border-2 py-3 text-sm font-bold uppercase" style={{ borderColor: "rgba(255,243,230,.3)", color: C.cream }}>
+        Esci dalla stanza
+      </button>
+    </div>
+  );
+}
+
+function NomadIntroPhase({ s }) {
+  const left = useNomadCountdown(s.introEndsAt);
+  const gameLabel = s.game === "sigla" ? "Indovina la Sigla" : "Indovina la Canzone";
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center text-center">
+      <p className="text-xs font-bold uppercase tracking-widest opacity-60">Round {s.round} di {s.totalRounds}</p>
+      <p className="pop mt-2 text-5xl uppercase" style={{ ...display, color: C.gold }}>{gameLabel}</p>
+      <p className="mt-4 text-sm opacity-70">Preparate orecchie e telefono: parte tra {Math.max(0, Math.ceil(left))}s</p>
+    </div>
+  );
+}
+
+function NomadPlayingPhase({ s, write }) {
+  const [title, setTitle] = useState("");
+  const [artist, setArtist] = useState("");
+  const [sent, setSent] = useState(false);
+  const [passed, setPassed] = useState(false);
+  const left = useNomadCountdown(s.answerEndsAt);
+  const canSend = title.trim() || artist.trim();
+
+  useEffect(() => { setTitle(""); setArtist(""); setSent(false); setPassed(false); }, [s.rid]);
+
+  async function submit() {
+    if (sent || passed || !canSend) return;
+    setSent(true);
+    const ok = await write({ rid: s.rid, title: title.trim().slice(0, 60), artist: artist.trim().slice(0, 60) });
+    if (!ok) setSent(false);
+  }
+  async function doPass() {
+    if (sent || passed) return;
+    setPassed(true);
+    const ok = await write({ rid: s.rid, pass: true });
+    if (!ok) setPassed(false);
+  }
+
+  const done = sent || passed;
+  const gameLabel = s.game === "sigla" ? "la sigla" : "la canzone";
+  const pct = Math.max(0, Math.min(100, (left / (NOMAD_ANSWER_MS / 1000)) * 100));
+
+  return (
+    <div className="flex flex-1 flex-col">
+      <div className="mb-2 h-2 w-full" style={{ background: "rgba(255,243,230,.1)" }}>
+        <div className="h-2" style={{ width: `${pct}%`, background: left < 8 ? C.magenta : C.gold, transition: "width .2s linear" }} />
+      </div>
+      <p className="text-xs font-bold uppercase tracking-widest opacity-60">Round {s.round} di {s.totalRounds} · {Math.max(0, Math.ceil(left))}s</p>
+      <div className="my-4 flex flex-col items-center justify-center">
+        <MusicPlayer videoId={s.videoId} start={s.start} startAt={s.audioStartAt} />
+      </div>
+      <p className="mb-3 text-center text-sm opacity-70">Scrivi cosa riconosci: {gameLabel} e chi la canta.</p>
+
+      {!done ? (
+        <>
+          <input value={title} onChange={(e) => setTitle(e.target.value.slice(0, 60))} placeholder="Titolo"
+            className="w-full border-2 bg-transparent px-4 py-4 text-lg font-bold" style={{ borderColor: C.gold, color: C.cream }} />
+          <input value={artist} onChange={(e) => setArtist(e.target.value.slice(0, 60))} placeholder="Artista / cantante"
+            className="mt-3 w-full border-2 bg-transparent px-4 py-4 text-lg font-bold" style={{ borderColor: "rgba(255,243,230,.3)", color: C.cream }} />
+          <button onClick={submit} disabled={!canSend} className="press mt-3 w-full py-4 text-2xl uppercase"
+            style={{ ...display, background: canSend ? C.gold : "rgba(255,243,230,.15)", color: canSend ? C.ink : "rgba(255,243,230,.4)" }}>
+            Manda la risposta
+          </button>
+          <button onClick={doPass} className="press mt-2 w-full py-3 text-sm font-bold uppercase tracking-wide opacity-70">
+            Passo, non la conosco
+          </button>
+        </>
+      ) : (
+        <div className="pop mt-4 px-4 py-6 text-center" style={{ background: sent ? C.gold : "rgba(255,243,230,.08)", color: sent ? C.ink : C.cream }}>
+          <p className="text-2xl uppercase" style={display}>{sent ? "Risposta inviata" : "Hai passato"}</p>
+          <p className="mt-1 text-sm font-bold opacity-80">Aspetta gli altri…</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NomadResultsPhase({ s, profile }) {
+  const results = s.results || [];
+  const podium = [results[1], results[0], results[2]];
+  const heights = [130, 180, 100];
+  const gameLabel = s.game === "sigla" ? "La sigla era" : "La canzone era";
+
+  return (
+    <div className="flex flex-1 flex-col">
+      <Confetti />
+      <p className="text-center text-xs uppercase tracking-widest opacity-60">Round {s.round} di {s.totalRounds}</p>
+      <p className="mb-1 text-center text-sm opacity-70">{gameLabel}</p>
+      <p className="mb-4 text-center text-2xl font-bold" style={{ color: C.gold }}>{s.track?.title} — {s.track?.artist}</p>
+
+      <div className="flex items-end justify-center gap-2">
+        {podium.map((r, i) => r && (
+          <div key={r.id} className="flex flex-col items-center" style={{ width: 90 }}>
+            <p className="mb-1 truncate text-xs font-bold" style={{ color: r.color }}>{r.name}</p>
+            <div className="flex w-full flex-col items-center justify-end border-2 px-1 pb-2" style={{ height: heights[i], borderColor: i === 1 ? C.gold : "rgba(255,243,230,.25)" }}>
+              <span>{i === 1 ? "🥇" : i === 0 ? "🥈" : "🥉"}</span>
+              <span className="text-sm font-bold">+{r.pts}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 space-y-1 overflow-y-auto">
+        {results.map((r) => (
+          <div key={r.id} className={`flex items-center gap-2 border-2 px-3 py-2 text-sm ${r.id === profile.id ? "glow" : ""}`} style={{ borderColor: r.id === profile.id ? r.color : "rgba(255,243,230,.15)" }}>
+            <span className="flex-1 font-bold">{r.name}</span>
+            <span className="text-xs opacity-70">{r.answered ? `«${r.title}»${r.artist ? ` — ${r.artist}` : ""}` : r.passed ? "ha passato" : "silenzio"}</span>
+            <span className="font-bold" style={{ color: r.pts > 0 ? C.lime : "rgba(255,243,230,.5)" }}>+{r.pts}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-center text-xs opacity-60">{s.round >= s.totalRounds ? "Ultimo round: arriva la classifica finale…" : "Prossimo round in arrivo…"}</p>
+    </div>
+  );
+}
+
+function NomadGameOverPhase({ s, profile, onExit }) {
+  const rank = s.finalRank || [];
+  const win = rank[0];
+  return (
+    <div className="flex flex-1 flex-col items-center">
+      <Confetti />
+      <p className="text-sm uppercase tracking-widest" style={{ color: C.lime }}>Fine partita</p>
+      {win && <h2 className="pop glow my-2 text-center text-5xl uppercase" style={{ ...display, color: win.color }}>{win.name}</h2>}
+      <div className="mt-4 w-full space-y-2">
+        {rank.map((p, i) => (
+          <div key={p.id} className={`flex items-center gap-3 border-2 px-4 py-3 ${p.id === profile.id ? "glow" : ""}`} style={{ borderColor: i === 0 ? p.color : "rgba(255,243,230,.15)" }}>
+            <span className="text-2xl" style={{ ...display, color: p.color }}>{i + 1}</span>
+            <span className="flex-1 font-bold">{p.name}</span>
+            <span className="font-bold">{p.score}</span>
+          </div>
+        ))}
+      </div>
+      <button onClick={onExit} className="press mt-8 w-full py-5 text-2xl uppercase"
+        style={{ ...display, background: C.lime, color: C.ink, boxShadow: `6px 6px 0 ${C.magenta}` }}>
+        Torna alla scelta Party/Nomad
+      </button>
     </div>
   );
 }

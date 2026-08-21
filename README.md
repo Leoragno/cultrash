@@ -1,7 +1,11 @@
 # CULTRASH
 
-Quiz di gruppo all'italiana: **lo schermo grande sta sul computer, i telefoni fanno da buzzer**.
-Si apre una stanza, gli altri entrano con un codice di quattro lettere e si gioca.
+Quiz di gruppo all'italiana, in due modalità:
+
+- **Party** — lo schermo grande sta sul computer, i telefoni fanno da buzzer. Si apre una
+  stanza, gli altri entrano con un codice di quattro lettere e si gioca.
+- **Nomad** — nessuno schermo condiviso: ogni giocatore, compreso chi crea la stanza, gioca solo
+  dal proprio telefono. Vedi [`NOMAD.md`](NOMAD.md) per come funziona e i suoi limiti noti.
 
 Otto categorie — musica, sport, trash, cultura, cibo & cucina, cinema, gaming, piccante — e
 diciannove minigiochi con meccaniche diverse fra loro: nessuno è la stessa domanda con un
@@ -123,13 +127,17 @@ con Redis o Postgres: l'interfaccia sono quattro funzioni.
 ├── index.html
 ├── server/index.js          # API di sincronizzazione + file statici
 ├── src/
-│   ├── App.jsx              # tutto il gioco: banche dati, host, telefono
+│   ├── App.jsx              # tutto il gioco: banche dati, host, telefono, Nomad
 │   ├── main.jsx
 │   ├── index.css
 │   ├── game/
 │   │   ├── utils.js         # funzioni pure (puzzle, roulette, squadre, chiavi)
 │   │   └── utils.test.js
-│   └── sync/                # adattatore: rest.js e local.js
+│   ├── nomad/                # logica pura di Nomad (vedi NOMAD.md): stati, round, QR
+│   │   ├── engine.js          # macchina a stati e timer
+│   │   ├── musicRound.js      # punteggio "Indovina la Canzone/Sigla"
+│   │   └── qrcode.js          # matrice QR del codice stanza
+│   └── sync/                # adattatore: rest.js, appwrite.js e local.js
 └── .github/workflows/ci.yml
 ```
 

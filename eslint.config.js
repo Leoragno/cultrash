@@ -10,6 +10,8 @@ const globaliBrowser = {
   requestAnimationFrame: "readonly", cancelAnimationFrame: "readonly", performance: "readonly",
   btoa: "readonly", atob: "readonly",
   SpeechSynthesisUtterance: "readonly", speechSynthesis: "readonly",
+  // NOMAD: link/QR della stanza (deep link ?room=) e condivisione/copia link.
+  navigator: "readonly", URLSearchParams: "readonly",
 };
 
 export default [
